@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 import time
 
 from dotenv import load_dotenv
@@ -19,6 +20,7 @@ load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
+    stream=sys.stdout,
     format=(
         "%(asctime)s "
         "%(levelname)s "
@@ -44,11 +46,11 @@ def main():
         return
 
     minutes = max(
-        15,
+        10,
         int(
             os.getenv(
                 "SYNC_INTERVAL_MINUTES",
-                "15"
+                "10"
             )
         )
     )
@@ -99,6 +101,11 @@ def main():
                 )
 
             try:
+                log.info(
+                    "[SCHEDULER] Next cycle in %s minutes",
+                    minutes
+                )
+
                 time.sleep(minutes * 60)
 
             except KeyboardInterrupt:

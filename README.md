@@ -83,7 +83,7 @@ Set `FUSIONSOLAR_ENABLED=true` in `.env`, then run this in a separate terminal:
 ```
 
 The worker retrieves the plant list at startup, then KPIs and alarms on each cycle.
-The interval follows `SYNC_INTERVAL_MINUTES`, with a minimum of 15 minutes.
+The interval follows `SYNC_INTERVAL_MINUTES`, with a minimum of 10 minutes.
 Alarm synchronization is skipped when `FUSIONSOLAR_ALARMS_PATH` is empty.
 The worker does not currently retrieve device lists automatically.
 
