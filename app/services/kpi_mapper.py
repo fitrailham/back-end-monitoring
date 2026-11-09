@@ -1,5 +1,6 @@
 
 from datetime import datetime, timezone
+import math
 
 from app.services.fusionsolar_client import extract_list
 
@@ -9,8 +10,9 @@ def _number(value):
         return None
 
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        result = float(value)
+        return result if math.isfinite(result) else None
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -173,6 +175,8 @@ def map_realtime(
         )
         timestamp_source = "collector"
 
+    collected_at = datetime.now(timezone.utc)
+
     return {
         "plant_code": plant_code,
         "recorded_at": timestamp,
@@ -180,6 +184,9 @@ def map_realtime(
         "data_source": "FUSIONSOLAR",
         "raw_data": {
             "sampling_time_source": timestamp_source,
-            "response": payload
+            "measured_at": timestamp.isoformat() if timestamp_source == "device" else None,
+            "collected_at": collected_at.isoformat(),
+            "real_health_state": m.get("real_health_state"),
+            "response": {"data": [row]}
         }
     }

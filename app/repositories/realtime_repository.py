@@ -127,7 +127,8 @@ def history(plant_code: str, limit: int = 100):
             yield_today_kwh::float8 AS yield_today_kwh,
             battery_soc_percent::float8
                 AS battery_soc_percent,
-            data_source
+            data_source,
+            raw_data AS snapshot_raw
 
         FROM public.plant_realtime
         WHERE plant_code = %s

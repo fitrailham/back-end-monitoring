@@ -12,7 +12,8 @@ The API reads from the database; the synchronization worker runs separately.
 - An active Northbound account with access to the required plants and APIs.
 - An active SSH tunnel if required for the database connection.
 
-The application does not currently provide migrations or create tables automatically.
+The application does not create base tables automatically. An additive migration for
+frontend metadata is provided below; the four base tables must already exist.
 
 ## Installation (PowerShell)
 
@@ -94,6 +95,30 @@ The worker does not currently retrieve device lists automatically.
 - `failCode=407`: wait before retrying and avoid running multiple synchronizations
   concurrently with the same account.
 - No data appears: check plant/API permissions and job results in `sync_logs`.
+
+## Frontend API contract
+
+Kontrak frontend dan langkah integrasi ada di [docs/frontend-api.md](docs/frontend-api.md).
+Endpoint baru: `GET /api/portfolio/summary`, `GET /api/database/yield-statistics`,
+`GET /api/database/rankings`, dan `GET /api/alarms`.
+Metadata lokasi/perangkat tersedia langsung pada plants dan overview.
+Overview tanpa `page`/`page_size` tetap mengembalikan seluruh PLTS.
+
+Untuk mengaktifkan penyimpanan metadata dan registrasi PLTS lokal, jalankan migrasi
+aditif secara terpisah setelah memeriksa target database pada `.env`:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.migrate
+```
+
+Migrasi menambahkan kolom `plants.metadata` dan indeks; tidak mengisi metadata
+atau memperbaiki kapasitas secara perkiraan. Pembacaan API kompatibel dengan database
+lama sebelum migrasi. POST/PATCH memerlukan migrasi dan `PLANT_WRITE_TOKEN` yang
+tidak kosong, dikirim melalui `Authorization: Bearer <token>`. Jangan menanamkan token
+administrator ke bundle frontend publik. Tanpa token konfigurasi, operasi tulis ditolak.
+
+Worker memperbarui inventory perangkat saat startup dan setiap 24 jam.
+Metadata inventory tidak digunakan sebagai bukti freshness telemetry.
 
 ## Tests
 

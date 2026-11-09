@@ -11,12 +11,15 @@ from fastapi.middleware.cors import (
 
 from app.config import CORS_ORIGINS
 from app.database import fetch_rows
+from app.errors import install_error_handlers
+from app.openapi import install_examples
 
 from app.api import (
     plants,
     monitoring,
     devices,
-    alarms
+    alarms,
+    portfolio
 )
 
 
@@ -32,14 +35,17 @@ logging.basicConfig(
 
 app = FastAPI(
     title="IconGreen Solar Monitoring",
-    version="1.0"
+    version="1.1"
 )
+
+install_error_handlers(app)
+install_examples(app)
 
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["*"]
 )
 
@@ -49,7 +55,8 @@ for module in (
     plants,
     monitoring,
     devices,
-    alarms
+    alarms,
+    portfolio
 ):
     app.include_router(module.router)
 

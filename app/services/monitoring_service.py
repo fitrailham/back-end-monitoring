@@ -9,7 +9,17 @@ def all_overviews():
 
 
 def history(code: str, limit: int):
-    return realtime_repository.history(code, limit)
+    from app.services.fleet_service import measurement
+    from app.services.values import utc_now
+    rows = realtime_repository.history(code, limit)
+    now = utc_now()
+    for row in rows:
+        _, _, measured, collected = measurement(row)
+        verified = measured is not None and measured <= now
+        row.update(measured_at=measured if verified else None, collected_at=collected,
+                   measurement_time_verified=verified)
+        row.pop("snapshot_raw", None)
+    return rows
 
 
 def to_mwh(value):
@@ -30,6 +40,7 @@ def format_dashboard(row: dict):
 
     uncertain_time = (
         row.get("timestamp_source") == "collector"
+        or row.get("data_quality", {}).get("measurement_time_verified") is False
     )
 
     stale = (

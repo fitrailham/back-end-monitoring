@@ -1,10 +1,23 @@
 import os
+import json
 from pathlib import Path
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 load_dotenv(PROJECT_ROOT / ".env")
+
+FUSIONSOLAR_ALARMS_PATH = os.getenv("FUSIONSOLAR_ALARMS_PATH", "").strip()
+SYNC_INTERVAL_MINUTES = max(10, int(os.getenv("SYNC_INTERVAL_MINUTES", "10")))
+EXPECTED_INTERVAL_SECONDS = SYNC_INTERVAL_MINUTES * 60
+PLANT_WRITE_TOKEN = os.getenv("PLANT_WRITE_TOKEN", "")
+# Extend only using the NBI reference for the deployed vendor version.
+DEVICE_TYPE_MAP = {
+    "1": "inverter", "38": "inverter", "39": "ess", "41": "ess",
+    "10": "emi", "17": "meter", "47": "meter", "2": "logger",
+    "62": "dongle", "63": "logger",
+}
+DEVICE_TYPE_MAP.update(json.loads(os.getenv("FUSIONSOLAR_DEVICE_TYPE_MAP", "{}")))
 
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
 

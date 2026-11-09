@@ -76,10 +76,10 @@ class FusionSolarClient:
         response.raise_for_status()
         payload = response.json()
 
-        if payload.get("success") is not True:
+        if not isinstance(payload, dict) or payload.get("success") is not True:
             raise FusionSolarError(
                 "Login Northbound gagal, failCode="
-                f"{payload.get('failCode')}"
+                f"{payload.get('failCode') if isinstance(payload, dict) else 'invalid-json'}"
             )
 
         token = (
@@ -118,16 +118,22 @@ class FusionSolarClient:
                 "Path endpoint Northbound tidak valid"
             )
 
-        response = self.http.post(
-            f"{self.base}/{path}",
-            headers={
-                "XSRF-TOKEN": self.token
-            },
-            json=body or {}
-        )
-
-        response.raise_for_status()
-        payload = response.json()
+        # Vendor failCode 305 means the session is no longer authenticated.
+        # Retry once after login; never retry quota/permission failures blindly.
+        for attempt in range(2):
+            response = self.http.post(
+                f"{self.base}/{path}",
+                headers={"XSRF-TOKEN": self.token},
+                json=body or {},
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, dict) and str(payload.get("failCode")) == "305" and attempt == 0:
+                self.token = None
+                self.http.cookies.clear()
+                self.login()
+                continue
+            break
 
         if (
             not isinstance(payload, dict)
@@ -207,3 +213,20 @@ def extract_list(payload: dict) -> list[dict]:
                 ]
 
     return []
+
+
+def complete_list(payload):
+    """A successful null/malformed/paginated body does not prove an empty collection."""
+    if not isinstance(payload, dict) or payload.get("success") is not True:
+        return False
+    data = payload.get("data")
+    if isinstance(data, list):
+        return all(isinstance(item, dict) for item in data)
+    if isinstance(data, dict):
+        for key in ("list", "records", "items"):
+            items = data.get(key)
+            if isinstance(items, list):
+                total = data.get("total", len(items))
+                return (all(isinstance(item, dict) for item in items)
+                        and isinstance(total, (int, float)) and total <= len(items))
+    return False

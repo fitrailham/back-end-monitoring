@@ -12,7 +12,8 @@ from app.services.fusionsolar_client import (
 from app.jobs import (
     plant_sync,
     realtime_sync,
-    alarm_sync
+    alarm_sync,
+    inventory_sync
 )
 
 
@@ -63,6 +64,7 @@ def main():
     with FusionSolarClient() as client:
 
         first = True
+        next_inventory = 0.0
 
         while True:
 
@@ -77,6 +79,13 @@ def main():
                     plant_sync.run(client)
 
                     first = False
+
+                if time.monotonic() >= next_inventory:
+                    try:
+                        inventory_sync.run(client)
+                    except Exception:
+                        log.exception("[SCHEDULER] Inventory unavailable; continuing telemetry cycle")
+                    next_inventory = time.monotonic() + 24 * 60 * 60
 
                 log.info(
                     "[SCHEDULER] Syncing realtime KPI..."

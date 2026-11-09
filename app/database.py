@@ -9,13 +9,23 @@ from app import config
 logger = logging.getLogger(__name__)
 
 
+def open_db():
+    if not config.DB_PASSWORD:
+        raise psycopg.OperationalError("Database password is not configured")
+    return psycopg.connect(
+        host=config.DB_HOST, port=config.DB_PORT, dbname=config.DB_NAME,
+        user=config.DB_USER, password=config.DB_PASSWORD,
+        connect_timeout=8, row_factory=dict_row,
+    )
+
+
 def fetch_rows(
     sql: str,
     params: tuple[Any, ...] = ()
 ) -> list[dict[str, Any]]:
 
     if not config.DB_PASSWORD:
-        raise RuntimeError(
+        raise psycopg.OperationalError(
             "DB_PASSWORD belum diisi pada file .env"
         )
 
