@@ -17,9 +17,11 @@ def configure_repositories(monkeypatch, codes):
     finish = Mock()
     save = Mock()
     raw = Mock()
+    state = Mock()
     monkeypatch.setattr(realtime_sync.sync_repository, "finish_job", finish)
     monkeypatch.setattr(realtime_sync.realtime_repository, "save_snapshot", save)
     monkeypatch.setattr(realtime_sync.raw_repository, "save_raw", raw)
+    monkeypatch.setattr(realtime_sync.normalized_repository, "upsert_source_state", state)
     return finish, save, raw
 
 

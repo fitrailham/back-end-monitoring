@@ -30,7 +30,7 @@ def plant_detail(plant_code: str):
 
 @router.post("/plants", status_code=201, response_model=RegisterPlantResponse,
     dependencies=[Depends(require_plant_write)],
-    description="Register a plant locally. Does not create or grant access to a FusionSolar plant. Requires PLANT_WRITE_TOKEN and metadata migration.")
+    description="Register a plant locally in plants and plant_metadata. Does not create or grant access to a FusionSolar plant. Requires PLANT_WRITE_TOKEN.")
 def register_plant(payload: RegisterPlant):
     plant_admin_repository.insert_plant(payload)
     return {**plant_detail(payload.plant_code),

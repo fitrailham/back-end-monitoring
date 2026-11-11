@@ -58,6 +58,10 @@ def interval_statistics(codes, start, end, grain, time_zone, samples=None, now=N
     start, end, zone = validate_range(start, end, grain, time_zone)
     now = now or utc_now()
     points = boundaries(start, end, grain, zone)
+    if samples is None:
+        stored = fleet_repository.energy_statistics(codes, start, end, grain, time_zone)
+        if stored:
+            return stored_statistics(codes, points, grain, time_zone, stored, now, zone, plant_code)
     samples = fleet_repository.counter_samples(codes, start, end) if samples is None else samples
     by_plant = defaultdict(dict)
     unverified = set()
@@ -146,4 +150,62 @@ def interval_statistics(codes, start, end, grain, time_zone, samples=None, now=N
             "metric": "pv_generation_energy", "total_yield_kwh": sum(known_energy) if known_energy else None,
             "method": "verified_total_counter_difference", "grain": grain, "time_zone": time_zone,
             "from_at": start, "to_at": end, "complete": bool(buckets) and all(b["quality"] in ("derived", "pending") for b in buckets),
+            "truncated": False, "buckets": buckets}
+
+
+def stored_statistics(codes, points, grain, time_zone, rows, now, zone, plant_code):
+    """Build the public bucket contract from normalized persisted statistics."""
+    latest = {}
+    for row in rows:
+        key = (row["plant_code"], aware_time(row["start_at"]), aware_time(row["end_at"]))
+        latest.setdefault(key, row)
+    buckets = []
+    methods = set()
+    for left, right in zip(points, points[1:]):
+        local = left.astimezone(zone)
+        label = local.strftime({"hour": "%H:%M", "day": "%Y-%m-%d", "month": "%Y-%m", "year": "%Y"}[grain])
+        coverage = dict(expected=len(codes), valid=0, missing=0, stale=0, unverified=0, not_applicable=0)
+        if left >= now:
+            buckets.append({"start_at": left, "end_at": right, "label": label,
+                            "label_at": local.isoformat(), "yield_kwh": None, "quality": "pending",
+                            "received_samples": 0, "expected_samples": 0, "reason": None,
+                            "coverage": {**coverage, "expected": 0, "partial": False}})
+            continue
+        values, received, expected, reasons = [], 0, 0, set()
+        for code in codes:
+            row = latest.get((code, left, right))
+            if row is None:
+                coverage["missing"] += 1
+                reasons.add("NO_STORED_STATISTIC")
+                continue
+            methods.add(row.get("method"))
+            received += row.get("received_samples") or 0
+            expected += row.get("expected_samples") or 0
+            value = number(row.get("yield_kwh"))
+            if row.get("complete") and row.get("quality") in ("measured", "derived") and value is not None:
+                coverage["valid"] += 1
+                values.append(value)
+            elif row.get("quality") == "unverified":
+                coverage["unverified"] += 1
+                reasons.add(row.get("reason") or "UNVERIFIED_STORED_STATISTIC")
+            else:
+                coverage["missing"] += 1
+                if value is not None:
+                    values.append(value)
+                reasons.add(row.get("reason") or "INCOMPLETE_STORED_STATISTIC")
+        complete = bool(codes) and coverage["valid"] == len(codes) and right <= now
+        quality = "measured" if complete else "partial" if values else "missing"
+        coverage["partial"] = not complete
+        buckets.append({"start_at": left, "end_at": right, "label": label,
+                        "label_at": local.isoformat(), "yield_kwh": sum(values) if values else None,
+                        "quality": quality, "received_samples": received,
+                        "expected_samples": expected, "reason": ";".join(sorted(reasons)) if reasons else None,
+                        "coverage": coverage})
+    known = [b["yield_kwh"] for b in buckets if b["yield_kwh"] is not None]
+    method = next(iter(methods)) if len(methods) == 1 else "normalized_stored_statistics"
+    return {"aggregation": "interval_energy", "unit": "kWh", "method": method,
+            "scope": "plant" if plant_code is not None else "portfolio", "plant_code": plant_code,
+            "metric": "pv_generation_energy", "total_yield_kwh": sum(known) if known else None,
+            "grain": grain, "time_zone": time_zone, "from_at": points[0], "to_at": points[-1],
+            "complete": all(b["quality"] in ("measured", "pending") for b in buckets),
             "truncated": False, "buckets": buckets}

@@ -1,6 +1,7 @@
 import logging
 
 from app.repositories import (
+    normalized_repository,
     plant_repository,
     realtime_repository,
     raw_repository,
@@ -57,6 +58,11 @@ def run(client, plant_code: str | None = None) -> int:
                         conn
                     )
                     realtime_repository.save_snapshot(snapshot, conn)
+                    normalized_repository.upsert_source_state(
+                        snapshot["plant_code"], "getStationRealKpi",
+                        configured=True, status="success", complete=True,
+                        count=1, attempted_at=snapshot["raw_data"].get("collected_at"), conn=conn,
+                    )
 
             count += len(snapshots)
 
@@ -74,6 +80,15 @@ def run(client, plant_code: str | None = None) -> int:
         return count
 
     except Exception as exc:
+
+        for code in codes:
+            try:
+                normalized_repository.upsert_source_state(
+                    code, "getStationRealKpi", configured=True,
+                    status="failed", complete=False, error=str(exc),
+                )
+            except Exception:
+                log.exception("[REALTIME SYNC] gagal menyimpan source state %s", code)
 
         sync_repository.finish_job(
             job_id,

@@ -7,13 +7,14 @@ The API reads from the database; the synchronization worker runs separately.
 ## Requirements
 
 - Python 3.10 or later.
-- PostgreSQL with the `public.plants`, `public.plant_realtime`,
-  `public.fusionsolar_raw`, and `public.sync_logs` tables.
+- PostgreSQL with the four legacy tables plus `plant_metadata`, `devices`,
+  `device_realtime`, `plant_energy_statistics`, `alarms`, `plant_source_state`,
+  `energy_tariffs`, and `environmental_factors`.
 - An active Northbound account with access to the required plants and APIs.
 - An active SSH tunnel if required for the database connection.
 
-The application does not create base tables automatically. An additive migration for
-frontend metadata is provided below; the four base tables must already exist.
+The application does not create tables automatically. The schema must be created by
+the database administrator. The provided migration only adds supporting indexes.
 
 ## Installation (PowerShell)
 
@@ -83,10 +84,14 @@ Set `FUSIONSOLAR_ENABLED=true` in `.env`, then run this in a separate terminal:
 .\.venv\Scripts\python.exe -m app.scheduler.scheduler
 ```
 
-The worker retrieves the plant list at startup, then KPIs and alarms on each cycle.
+The worker retrieves the plant list at startup, then station KPIs and alarms on each cycle.
 The interval follows `SYNC_INTERVAL_MINUTES`, with a minimum of 10 minutes.
 Alarm synchronization is skipped when `FUSIONSOLAR_ALARMS_PATH` is empty.
-The worker does not currently retrieve device lists automatically.
+Device inventory is refreshed at startup and every 24 hours. Device realtime KPI
+remains disabled until `FUSIONSOLAR_DEVICE_REALTIME_ENABLED=true` because it consumes
+additional Northbound quota. Signed grid/battery power remains null until
+`FUSIONSOLAR_POWER_DIRECTION_CONVENTION=grid_import_battery_discharge_positive` is
+explicitly configured after the source sign has been verified.
 
 ## Troubleshooting
 
@@ -104,16 +109,16 @@ Endpoint baru: `GET /api/portfolio/summary`, `GET /api/database/yield-statistics
 Metadata lokasi/perangkat tersedia langsung pada plants dan overview.
 Overview tanpa `page`/`page_size` tetap mengembalikan seluruh PLTS.
 
-Untuk mengaktifkan penyimpanan metadata dan registrasi PLTS lokal, jalankan migrasi
-aditif secara terpisah setelah memeriksa target database pada `.env`:
+Setelah seluruh tabel normalisasi dibuat, indeks pendukung dapat diterapkan secara
+terpisah setelah memeriksa target database pada `.env`:
 
 ```powershell
 .\.venv\Scripts\python.exe -m app.migrate
 ```
 
-Migrasi menambahkan kolom `plants.metadata` dan indeks; tidak mengisi metadata
-atau memperbaiki kapasitas secara perkiraan. Pembacaan API kompatibel dengan database
-lama sebelum migrasi. POST/PATCH memerlukan migrasi dan `PLANT_WRITE_TOKEN` yang
+Migrasi hanya menambahkan indeks dan tidak mengisi data. API membaca `plant_metadata`
+dan `devices`, dengan fallback ke cache legacy selama tabel baru masih kosong.
+POST/PATCH memerlukan tabel baru dan `PLANT_WRITE_TOKEN` yang
 tidak kosong, dikirim melalui `Authorization: Bearer <token>`. Jangan menanamkan token
 administrator ke bundle frontend publik. Tanpa token konfigurasi, operasi tulis ditolak.
 

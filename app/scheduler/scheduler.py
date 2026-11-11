@@ -5,6 +5,7 @@ import time
 
 from dotenv import load_dotenv
 
+from app import config
 from app.services.fusionsolar_client import (
     FusionSolarClient
 )
@@ -13,7 +14,8 @@ from app.jobs import (
     plant_sync,
     realtime_sync,
     alarm_sync,
-    inventory_sync
+    inventory_sync,
+    device_realtime_sync,
 )
 
 
@@ -85,13 +87,15 @@ def main():
                         inventory_sync.run(client)
                     except Exception:
                         log.exception("[SCHEDULER] Inventory unavailable; continuing telemetry cycle")
-                    next_inventory = time.monotonic() + 24 * 60 * 60
+                    next_inventory = time.monotonic() + config.INVENTORY_SYNC_INTERVAL_HOURS * 60 * 60
 
                 log.info(
                     "[SCHEDULER] Syncing realtime KPI..."
                 )
 
                 realtime_sync.run(client)
+
+                device_realtime_sync.run(client)
 
                 log.info(
                     "[SCHEDULER] Checking alarms..."

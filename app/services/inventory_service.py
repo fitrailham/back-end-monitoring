@@ -23,11 +23,11 @@ def devices(payload, plant_code):
     for raw in extract_list(payload or {}):
         if str(raw.get("stationCode", plant_code)) != plant_code:
             continue
-        kind = str(raw.get("devTypeId", ""))
+        kind = str(raw.get("devTypeId", raw.get("vendor_device_type_id", "")))
         pair = coordinate_pair(raw.get("latitude"), raw.get("longitude"))
         device_id = raw.get("devDn") or raw.get("id") or raw.get("device_id")
         serial = raw.get("esnCode", raw.get("device_sn"))
-        dtype = config.DEVICE_TYPE_MAP.get(kind, "unknown")
+        dtype = config.DEVICE_TYPE_MAP.get(kind, raw.get("device_type", "unknown"))
         if dtype not in ("inverter", "ess", "meter", "logger", "dongle", "emi", "unknown"):
             dtype = "unknown"
         # Keep original vendor aliases for existing consumers.
@@ -43,14 +43,16 @@ def devices(payload, plant_code):
             "plant_code": plant_code,
             "vendor_device_type_id": int(kind) if kind.isdigit() else kind or None,
             "model": str(raw["model"]) if raw.get("model") is not None else None,
+            "software_version": raw.get("software_version", raw.get("softwareVersion")),
             "device_type": dtype,
-            "optimizer_quantity": whole_number(raw.get("optimizerNumber")) if dtype == "inverter" else None,
+            "optimizer_quantity": whole_number(raw.get("optimizer_quantity", raw.get("optimizerNumber"))) if dtype == "inverter" else None,
             "latitude": pair[0] if pair else None,
             "longitude": pair[1] if pair else None,
             # Only explicitly unit-qualified normalized fields are accepted.
             "rated_ac_power_kw": number(raw.get("rated_ac_power_kw")),
             "rated_energy_kwh": number(raw.get("rated_energy_kwh")),
-            "status": "unknown", "last_seen_at": None,
+            "status": raw.get("status") if raw.get("status") in ("normal", "faulty", "disconnected") else "unknown",
+            "last_seen_at": aware_time(raw.get("last_seen_at")),
         })
     return result
 
@@ -66,6 +68,8 @@ def metadata(row):
         total = number(data.get("total"))
         if total is not None and total > len(inventory):
             complete = False
+    if row.get("normalized_inventory_complete") is not None:
+        complete = complete and bool(row["normalized_inventory_complete"])
     complete = complete and not any(d["device_type"] == "unknown" for d in inventory)
     inverters = [d for d in inventory if d["device_type"] == "inverter"]
     ess = [d for d in inventory if d["device_type"] == "ess"]
@@ -99,7 +103,7 @@ def metadata(row):
         **{k: master.get(k) for k in ("country_code", "country_name", "region", "city", "time_zone",
                                      "image_url", "grid_connected_on")},
         "latitude": selected[0] if selected else None, "longitude": selected[1] if selected else None,
-        "location_source": "plant_metadata" if explicit else "device_inventory" if selected else None,
+        "location_source": master.get("location_source") or ("plant_master" if explicit else "device_inventory" if selected else None),
         "location_verified": verified, "location_conflict": conflict,
         "has_pv": master.get("has_pv", True if capacity is not None and capacity > 0 or inverters else False if complete else None),
         "has_ess": master.get("has_ess", True if ess else False if complete else None),

@@ -222,13 +222,14 @@ Sinkronisasi master dari vendor tetap dapat memperbarui kapasitas berdasarkan da
 Format error: success false, message, data null, error.code/retryable/retry_after_seconds/fields,
 request_id. Header X-Request-ID cocok dengan request_id. 404 PLANT_NOT_FOUND,
 409 PLANT_ALREADY_EXISTS, 422 VALIDATION_ERROR atau kode validasi rentang, 503 DATABASE_UNAVAILABLE
-atau MIGRATION_REQUIRED. Pesan database tidak diteruskan ke client.
+atau SCHEMA_REQUIRED. Pesan database tidak diteruskan ke client.
 
 Worker mencoba login ulang sekali untuk failCode 305, tanpa retry otomatis quota 407.
-Sumber yang saat ini menyimpan day_power/total_power tidak menyediakan daya PV/load/grid atau
-telemetry ESS. Implementasi ini belum menambahkan pengambilan getDevRealKpi dan belum menetapkan
-konvensi arah daya. Dibutuhkan izin API dan pemetaan telemetry perangkat yang tervalidasi untuk
-mengisi field tersebut. Kapasitas nol harus dikoreksi berdasarkan nameplate, bukan estimasi.
+Sumber station KPI yang saat ini menyimpan day_power/total_power tidak menyediakan daya
+PV/load/grid atau telemetry ESS. Worker `getDevRealKpi` sudah tersedia, tetapi dinonaktifkan
+secara default agar tidak menambah pemakaian kuota tanpa sengaja. Aktifkan hanya setelah izin
+endpoint tersedia. Grid/battery power tetap null sampai konvensi arah daya sumber diverifikasi
+dan dikonfigurasi eksplisit. Kapasitas nol harus dikoreksi berdasarkan nameplate, bukan estimasi.
 
 Pemetaan tipe perangkat/health/severity merujuk dokumen Huawei
 [SmartPVMS 25.2.0 NBI Reference, Issue 01](https://www.scribd.com/document/980589962/SmartPVMS-25-2-0-Northbound-API-Reference)

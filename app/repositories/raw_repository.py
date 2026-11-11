@@ -8,28 +8,32 @@ def save_raw(
     plant_code: str | None,
     endpoint: str,
     payload: dict,
-    conn=None
+    conn=None,
+    collected_at=None,
 ):
 
     def write(db):
-        db.execute("""
+        return db.execute("""
             INSERT INTO public.fusionsolar_raw (
                 plant_code,
                 api_endpoint,
+                collected_at,
                 raw_data
             )
-            VALUES (%s, %s, %s)
+            VALUES (%s, %s, COALESCE(%s, NOW()), %s)
+            RETURNING id, collected_at
         """, (
             plant_code,
             endpoint,
+            collected_at,
             Jsonb(payload)
-        ))
+        )).fetchone()
 
     if conn is not None:
-        write(conn)
+        return write(conn)
     else:
         with open_db() as db:
-            write(db)
+            return write(db)
 
 
 def latest_raw(plant_code: str, endpoint: str):

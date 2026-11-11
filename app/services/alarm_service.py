@@ -55,22 +55,36 @@ def normalize_alarm(raw, plant_code):
 
 def fleet_alarms(raw_rows, severity=None, state=None, page=None, page_size=None, plant_code=None):
     now = utc_now()
-    configured = bool(config.FUSIONSOLAR_ALARMS_PATH)
-    coverage = dict(expected_plants=len(raw_rows), configured_plants=len(raw_rows) if configured else 0,
-                    unconfigured_plants=0 if configured else len(raw_rows), failed_plants=0,
+    # An empty filtered scope still reports whether the source itself is configured.
+    configured = bool(config.FUSIONSOLAR_ALARMS_PATH) if not raw_rows else False
+    coverage = dict(expected_plants=len(raw_rows), configured_plants=0,
+                    unconfigured_plants=0, failed_plants=0,
                     missing_plants=0, stale_plants=0, valid_plants=0, complete=False)
     alarms, times = [], []
     unknown_states = False
     for row in raw_rows:
-        if not configured:
+        row_configured = bool(config.FUSIONSOLAR_ALARMS_PATH) or row.get("alarm_configured") is True
+        if not row_configured:
+            coverage["unconfigured_plants"] += 1
             continue
-        payload = row.get("alarms_payload")
-        collected = aware_time(row.get("alarms_collected_at"))
-        job_started = aware_time(row.get("alarm_job_started_at"))
-        failed = row.get("alarm_job_status") == "FAILED" and (not collected or not job_started or job_started >= collected)
+        configured = True
+        coverage["configured_plants"] += 1
+        normalized = row.get("normalized_alarms")
+        if normalized is not None or row.get("alarm_source_status") is not None:
+            items = normalized or []
+            collected = aware_time(row.get("alarm_last_success_at"))
+            failed = row.get("alarm_source_status") == "failed"
+            source_complete = row.get("alarm_source_complete") is True
+        else:
+            payload = row.get("alarms_payload")
+            items = extract_list(payload) if complete_list(payload) else None
+            collected = aware_time(row.get("alarms_collected_at"))
+            job_started = aware_time(row.get("alarm_job_started_at"))
+            failed = row.get("alarm_job_status") == "FAILED" and (not collected or not job_started or job_started >= collected)
+            source_complete = complete_list(payload)
         if failed:
             coverage["failed_plants"] += 1
-        if not complete_list(payload) or collected is None:
+        if not source_complete or collected is None or items is None:
             coverage["missing_plants"] += 1
             continue
         times.append(collected)
@@ -79,7 +93,7 @@ def fleet_alarms(raw_rows, severity=None, state=None, page=None, page_size=None,
             coverage["stale_plants"] += 1
         elif not failed:
             coverage["valid_plants"] += 1
-        for raw in extract_list(payload):
+        for raw in items:
             if str(raw.get("stationCode", row["plant_code"])) != row["plant_code"]:
                 continue
             alarm = normalize_alarm(raw, row["plant_code"])
@@ -88,7 +102,8 @@ def fleet_alarms(raw_rows, severity=None, state=None, page=None, page_size=None,
             if severity and alarm["severity"] != severity or state and alarm["state"] != state:
                 continue
             alarms.append(alarm)
-    coverage["complete"] = configured and coverage["valid_plants"] == len(raw_rows) and not unknown_states
+    coverage["complete"] = configured and coverage["configured_plants"] == len(raw_rows) \
+        and coverage["valid_plants"] == len(raw_rows) and not unknown_states
     quality = "missing" if not configured or not times else "partial" if not coverage["complete"] else "fresh"
     if times and coverage["stale_plants"] == len(raw_rows):
         quality = "stale"

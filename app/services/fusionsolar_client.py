@@ -1,6 +1,7 @@
 
 import os
 import time
+from datetime import datetime, timezone
 import httpx
 
 from dotenv import load_dotenv
@@ -174,7 +175,16 @@ class FusionSolarClient:
             {"stationCodes": plant_code}
         )
 
-    def get_alarms(self, plant_code: str):
+    def get_device_kpi(self, device_type_id: str, device_ids: list[str]):
+        if not device_ids or len(device_ids) > 100:
+            raise FusionSolarError("getDevRealKpi memerlukan 1-100 device ID")
+        return self.post(
+            "getDevRealKpi",
+            {"devTypeId": int(device_type_id) if str(device_type_id).isdigit() else device_type_id,
+             "devIds": ",".join(str(value) for value in device_ids)},
+        )
+
+    def get_alarms(self, plant_code: str, begin_time: datetime, end_time: datetime):
         path = os.getenv(
             "FUSIONSOLAR_ALARMS_PATH", ""
         )
@@ -186,7 +196,12 @@ class FusionSolarClient:
 
         return self.post(
             path,
-            {"stationCodes": plant_code}
+            {
+                "stationCodes": plant_code,
+                "beginTime": int(begin_time.astimezone(timezone.utc).timestamp() * 1000),
+                "endTime": int(end_time.astimezone(timezone.utc).timestamp() * 1000),
+                "language": os.getenv("FUSIONSOLAR_ALARM_LANGUAGE", "en_US"),
+            }
         )
 
 

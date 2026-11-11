@@ -33,7 +33,7 @@ def require_plant(rows):
     return rows[0]
 
 
-def measurement(row):
+def legacy_measurement(row):
     raw = row.get("snapshot_raw") or {}
     source = raw.get("sampling_time_source") or row.get("timestamp_source")
     recorded = aware_time(row.get("recorded_at"))
@@ -46,12 +46,25 @@ def measurement(row):
     return source, recorded, measured, collected
 
 
+def measurement(row):
+    if row.get("normalized_metric_fields"):
+        verified = row.get("normalized_time_verified") is True
+        measured = aware_time(row.get("normalized_measured_at")) if verified else None
+        collected = aware_time(row.get("normalized_collected_at"))
+        return "device" if verified else "collector", aware_time(row.get("recorded_at")), measured, collected
+    return legacy_measurement(row)
+
+
 def normalize(row, now=None):
     now = now or utc_now()
     result = inventory_service.metadata(row)
     source, recorded, measured, collected = measurement(row)
     verified = measured is not None and measured <= now + timedelta(minutes=1)
     age = max(0.0, (now - measured).total_seconds()) if verified else None
+    legacy_source, _, legacy_measured, legacy_collected = legacy_measurement(row)
+    legacy_verified = legacy_measured is not None and legacy_measured <= now + timedelta(minutes=1)
+    legacy_age = max(0.0, (now - legacy_measured).total_seconds()) if legacy_verified else None
+    normalized_fields = row.get("normalized_metric_fields") or {}
     metrics = {k: number(row.get(k)) for k in METRIC_FIELDS}
     for key in ("pv_power_kw", "load_power_kw", "yield_today_kwh", "total_yield_kwh", "ess_charge_today_kwh", "ess_discharge_today_kwh"):
         if metrics[key] is not None and metrics[key] < 0:
@@ -61,25 +74,28 @@ def normalize(row, now=None):
         metrics["battery_soc_percent"] = None
     field_quality = {}
     for key, value in metrics.items():
+        field_is_normalized = normalized_fields.get(key) is True
+        field_verified = verified if field_is_normalized else legacy_verified
+        field_age = age if field_is_normalized else legacy_age
         if key.startswith(("battery_", "ess_")) and result["has_ess"] is False:
             field_quality[key] = "NOT_INSTALLED"
         elif value is None:
             field_quality[key] = "SOURCE_UNAVAILABLE"
         elif result["is_demo"]:
             field_quality[key] = "DEMO_DATA"
-        elif not verified:
+        elif not field_verified:
             field_quality[key] = "TIME_UNVERIFIED"
-        elif age > config.STALE_AFTER_MINUTES * 60:
+        elif field_age > config.STALE_AFTER_MINUTES * 60:
             field_quality[key] = "STALE"
         else:
             field_quality[key] = "VALID"
     if not any(value is not None for value in metrics.values()):
         state = "missing"
-    elif not verified or result["is_demo"]:
+    elif not any(v in ("VALID", "STALE") for v in field_quality.values()):
         state = "unverified"
-    elif age > config.STALE_AFTER_MINUTES * 60:
+    elif not any(v == "VALID" for v in field_quality.values()) and any(v == "STALE" for v in field_quality.values()):
         state = "stale"
-    elif any(v == "SOURCE_UNAVAILABLE" for v in field_quality.values()):
+    elif any(v not in ("VALID", "NOT_INSTALLED") for v in field_quality.values()):
         state = "partial"
     else:
         state = "fresh"
@@ -92,11 +108,21 @@ def normalize(row, now=None):
     status = "unknown"
     reason = "STATUS_SOURCE_UNAVAILABLE"
     status_source = None
-    if health is not None:
-        status_source = "fusionsolar.real_health_state"
-        if not verified or result["is_demo"]:
+    normalized_status = row.get("normalized_status")
+    if normalized_status in ("normal", "faulty", "disconnected"):
+        status_source = "normalized_device_realtime"
+        if not verified:
             reason = "STATUS_TIME_UNVERIFIED"
         elif age > config.STALE_AFTER_MINUTES * 60:
+            reason = "STATUS_STALE"
+        else:
+            status = normalized_status
+            reason = row.get("normalized_status_reason") or "SOURCE_DEVICE_STATUS"
+    elif health is not None:
+        status_source = "fusionsolar.real_health_state"
+        if not legacy_verified or result["is_demo"]:
+            reason = "STATUS_TIME_UNVERIFIED"
+        elif legacy_age > config.STALE_AFTER_MINUTES * 60:
             reason = "STATUS_STALE"
         else:
             status = {"1": "disconnected", "2": "faulty", "3": "normal"}.get(str(health), "unknown")
@@ -104,20 +130,23 @@ def normalize(row, now=None):
     capacity = result["capacity_kwp"]
     specific = metrics["yield_today_kwh"] / capacity if capacity is not None and capacity > 0 and metrics["yield_today_kwh"] is not None else None
     zone = valid_zone(result["time_zone"])
+    yield_measured = measured if normalized_fields.get("yield_today_kwh") is True else legacy_measured
+    yield_verified = verified if normalized_fields.get("yield_today_kwh") is True else legacy_verified
+    expected_interval = row.get("normalized_expected_interval_seconds") or config.EXPECTED_INTERVAL_SECONDS
     return {**result, **metrics,
             "recorded_at": recorded, "timestamp_source": source,
             "measured_at": measured if verified else None, "collected_at": collected,
             "measurement_time_verified": verified, "data_source": row.get("data_source"),
             "status": status, "status_source": status_source, "status_reason": reason,
-            "last_seen_at": measured if verified else None,
-            "yield_business_date": measured.astimezone(zone).date() if verified and zone else None,
+            "last_seen_at": measured if verified else legacy_measured if legacy_verified else None,
+            "yield_business_date": yield_measured.astimezone(zone).date() if yield_verified and zone else None,
             "specific_energy_kwh_per_kwp": specific, "performance_ratio_percent": None,
             "poa_irradiation_today_kwh_m2": None, "revenue_today_idr": None,
-            "power_direction_convention": "source_native_unverified",
+            "power_direction_convention": row.get("normalized_power_direction_convention") or "source_native_unverified",
             "data_quality": {"state": state, "measured_at": measured if verified else None,
                              "collected_at": collected, "measurement_time_verified": verified,
                              "age_seconds": age, "stale_after_seconds": config.STALE_AFTER_MINUTES * 60,
-                             "expected_interval_seconds": config.EXPECTED_INTERVAL_SECONDS,
+                             "expected_interval_seconds": expected_interval,
                              "missing_fields": [k for k, v in metrics.items() if v is None and field_quality[k] != "NOT_INSTALLED"],
                              "not_applicable_fields": [k for k, v in field_quality.items() if v == "NOT_INSTALLED"],
                              "field_quality": field_quality}}
