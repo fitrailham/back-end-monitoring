@@ -1,6 +1,7 @@
 
 import os
 import time
+import math
 from datetime import datetime, timezone
 import httpx
 
@@ -11,6 +12,16 @@ load_dotenv()
 
 class FusionSolarError(Exception):
     pass
+
+
+class NorthboundRateLimitError(FusionSolarError):
+    def __init__(self, endpoint: str, retry_after_seconds: int):
+        self.endpoint = endpoint
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(
+            f"Northbound {endpoint} gagal, failCode=407. "
+            f"Request akun ditunda {retry_after_seconds} detik untuk menghindari login berulang."
+        )
 
 
 class FusionSolarClient:
@@ -43,6 +54,11 @@ class FusionSolarClient:
                 "Credential FusionSolar belum disetel di .env"
             )
 
+        # Local cooldown is conservative; it does not claim the vendor quota has reset.
+        self.quota_cooldown_seconds = max(600, int(os.getenv("FUSIONSOLAR_QUOTA_COOLDOWN_SECONDS", "600")))
+        self._quota_until = 0.0
+        self._quota_endpoint = "login"
+
         self.http = httpx.Client(
             timeout=25,
             follow_redirects=False
@@ -64,8 +80,20 @@ class FusionSolarClient:
     # LOGIN
     # =============================
 
+    def _check_quota_cooldown(self):
+        remaining = math.ceil(self._quota_until - time.monotonic())
+        if remaining > 0:
+            raise NorthboundRateLimitError(self._quota_endpoint, remaining)
+
+    def _check_rate_limit(self, payload, endpoint: str):
+        if isinstance(payload, dict) and str(payload.get("failCode")) == "407":
+            self._quota_endpoint = endpoint
+            self._quota_until = time.monotonic() + self.quota_cooldown_seconds
+            raise NorthboundRateLimitError(endpoint, self.quota_cooldown_seconds)
+
     def login(self):
 
+        self._check_quota_cooldown()
         response = self.http.post(
             self.base + "/login",
             json={
@@ -76,6 +104,7 @@ class FusionSolarClient:
 
         response.raise_for_status()
         payload = response.json()
+        self._check_rate_limit(payload, "login")
 
         if not isinstance(payload, dict) or payload.get("success") is not True:
             raise FusionSolarError(
@@ -107,6 +136,7 @@ class FusionSolarClient:
         body: dict | None = None
     ) -> dict:
 
+        self._check_quota_cooldown()
         if not self.token or (
             time.monotonic() >= self.expires_at
         ):
@@ -129,6 +159,7 @@ class FusionSolarClient:
             )
             response.raise_for_status()
             payload = response.json()
+            self._check_rate_limit(payload, path)
             if isinstance(payload, dict) and str(payload.get("failCode")) == "305" and attempt == 0:
                 self.token = None
                 self.http.cookies.clear()

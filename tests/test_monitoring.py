@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.services.kpi_mapper import (
+    NoUsableKpiError,
     map_station,
     map_realtime
 )
@@ -55,6 +56,32 @@ def test_unknown_kpi_does_not_write_fake_zero():
                 }
             }]
         }, "NE=1")
+
+
+@pytest.mark.parametrize("invalid", [None, "", "invalid", "NaN", float("inf"), True])
+def test_realtime_uses_valid_alias_when_primary_value_is_invalid(invalid):
+    snapshot = map_realtime({"data": [{
+        "stationCode": "NE=1",
+        "dataItemMap": {"day_power": invalid, "yield_today_kwh": 0},
+    }]}, "NE=1")
+
+    assert snapshot["yield_today_kwh"] == 0
+    assert snapshot["pv_power_kw"] is None
+
+
+@pytest.mark.parametrize("kpis, reason", [
+    ({}, "dataItemMap kosong"),
+    ({"real_health_state": 3}, "tidak ada field metrik yang dikenali"),
+    ({"day_power": None, "total_power": "NaN"}, "semua nilai metrik"),
+])
+def test_unusable_kpi_identifies_plant_and_fields_without_logging_values(kpis, reason):
+    with pytest.raises(NoUsableKpiError) as caught:
+        map_realtime({"data": [{"stationCode": "NE=1", "dataItemMap": kpis}]}, "NE=1")
+
+    assert caught.value.plant_code == "NE=1"
+    assert "NE=1" in str(caught.value)
+    assert reason in str(caught.value)
+    assert set(caught.value.fields) == set(kpis)
 
 
 def test_dashboard_converts_energy_only():

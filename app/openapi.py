@@ -9,23 +9,24 @@ def install_examples(app):
 
     def openapi():
         schema = original()
-        path = config.PROJECT_ROOT / "docs" / "frontend-api-examples.json"
-        if not path.exists():
-            return schema
-        fixtures = json.loads(path.read_text(encoding="utf-8"))
-        for group in ("endpoints", "errors"):
-            for name, example in fixtures[group].items():
-                operation = schema["paths"].get(example["path"], {}).get(example["method"].lower())
-                if operation is None:
-                    continue
-                response = operation["responses"].get(str(example["status"]))
-                if response is None:
-                    continue
-                content = response.setdefault("content", {}).setdefault("application/json", {})
-                content.setdefault("examples", {})[name] = {
-                    "summary": "Fixture ilustratif: " + name,
-                    "value": example["response"],
-                }
+        for filename in ("frontend-api-examples.json", "fe-analytics-examples.json"):
+            path = config.PROJECT_ROOT / "docs" / filename
+            if not path.exists():
+                continue
+            fixtures = json.loads(path.read_text(encoding="utf-8"))
+            for group in ("endpoints", "errors"):
+                for name, example in fixtures.get(group, {}).items():
+                    operation = schema["paths"].get(example["path"], {}).get(example["method"].lower())
+                    if operation is None:
+                        continue
+                    response = operation["responses"].get(str(example["status"]))
+                    if response is None:
+                        continue
+                    content = response.setdefault("content", {}).setdefault("application/json", {})
+                    content.setdefault("examples", {})[name] = {
+                        "summary": "Fixture ilustratif: " + name,
+                        "value": example["response"],
+                    }
         return schema
 
     app.openapi = openapi

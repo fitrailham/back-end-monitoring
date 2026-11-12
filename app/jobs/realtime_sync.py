@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 
 from app.repositories import (
     normalized_repository,
@@ -8,7 +9,8 @@ from app.repositories import (
     sync_repository
 )
 
-from app.services.kpi_mapper import map_realtime
+from app.services.kpi_mapper import NoUsableKpiError, map_realtime
+from app.services.sync_diagnostics import failure_details
 
 
 log = logging.getLogger(__name__)
@@ -31,6 +33,8 @@ def run(client, plant_code: str | None = None) -> int:
     )
 
     count = 0
+    processed = set()
+    unavailable = {}
 
     try:
 
@@ -43,20 +47,38 @@ def run(client, plant_code: str | None = None) -> int:
         # Batch up to 100 plants to avoid exhausting the Northbound quota.
         for offset in range(0, len(codes), 100):
             batch = codes[offset:offset + 100]
+            attempted_at = datetime.now(timezone.utc)
             response = client.get_station_kpi(
                 ",".join(batch)
             )
-            snapshots = [map_realtime(response, code) for code in batch]
+            snapshots = {}
+            batch_errors = {}
+            skipped_raw_ids = {}
+            for code in batch:
+                try:
+                    snapshots[code] = map_realtime(response, code)
+                except NoUsableKpiError as exc:
+                    batch_errors[code] = exc
 
             with plant_repository.open_db() as conn:
 
-                for snapshot in snapshots:
-                    raw_repository.save_raw(
-                        snapshot["plant_code"],
+                for code in batch:
+                    raw_row = raw_repository.save_raw(
+                        code,
                         "getStationRealKpi",
                         response,
                         conn
                     )
+                    if code in batch_errors:
+                        skipped_raw_ids[code] = raw_row["id"]
+                        normalized_repository.upsert_source_state(
+                            code, "getStationRealKpi", configured=True,
+                            status="failed", complete=False, count=0,
+                            error=str(batch_errors[code]), attempted_at=attempted_at, conn=conn,
+                        )
+                        continue
+
+                    snapshot = snapshots[code]
                     realtime_repository.save_snapshot(snapshot, conn)
                     normalized_repository.upsert_source_state(
                         snapshot["plant_code"], "getStationRealKpi",
@@ -65,23 +87,59 @@ def run(client, plant_code: str | None = None) -> int:
                     )
 
             count += len(snapshots)
+            processed.update(batch)
+            unavailable.update(batch_errors)
+            # Report raw evidence only after the transaction has committed.
+            for code, error in batch_errors.items():
+                log.warning(
+                    "Snapshot KPI dilewati.",
+                    extra={"event": "realtime.snapshot_skipped", "details": {
+                        "job": "realtime_sync", "job_id": job_id,
+                        "endpoint": "getStationRealKpi", "plant_code": code,
+                        "diagnostic": error.details(),
+                        "impact": "Snapshot lama dipertahankan; plant lain tetap diproses.",
+                        "evidence": {"table": "public.fusionsolar_raw", "raw_id": skipped_raw_ids[code],
+                                     "source_state_table": "public.plant_source_state"},
+                    }},
+                )
 
             log.info(
-                "[REALTIME SYNC] %s plant tersimpan",
-                len(snapshots)
+                "Batch realtime tersimpan.",
+                extra={"event": "realtime.batch_saved", "details": {
+                    "job_id": job_id, "batch": offset // 100 + 1,
+                    "saved": len(snapshots), "skipped": len(batch_errors),
+                }},
             )
 
-        sync_repository.finish_job(
-            job_id,
-            True,
-            count
-        )
+        if unavailable:
+            summary = (
+                f"{len(unavailable)} dari {len(codes)} plant tanpa KPI valid; "
+                f"{count} snapshot tersimpan. " + "; ".join(str(error) for error in unavailable.values())
+            )
+            sync_repository.finish_job(job_id, False, count, summary)
+            # Details are already logged per plant; keep the final summary concise.
+            log.warning("Sinkronisasi realtime belum lengkap.",
+                extra={"event": "realtime.summary", "details": {
+                    "job": "realtime_sync", "job_id": job_id, "status": "partial",
+                    "job_status": "FAILED", "total_plants": len(codes), "saved": count,
+                    "skipped": len(unavailable), "skipped_plants": list(unavailable),
+                    "note": "Detail penyebab tersedia pada event realtime.snapshot_skipped dan sync_logs.",
+                }})
+        else:
+            sync_repository.finish_job(job_id, True, count)
+            log.info("Sinkronisasi realtime selesai.",
+                extra={"event": "realtime.summary", "details": {
+                    "job": "realtime_sync", "job_id": job_id, "status": "success",
+                    "job_status": "SUCCESS", "total_plants": len(codes), "saved": count, "skipped": 0,
+                }})
 
         return count
 
     except Exception as exc:
 
         for code in codes:
+            if code in processed:
+                continue
             try:
                 normalized_repository.upsert_source_state(
                     code, "getStationRealKpi", configured=True,
@@ -98,7 +156,14 @@ def run(client, plant_code: str | None = None) -> int:
         )
 
         log.exception(
-            "[REALTIME SYNC] gagal"
+            "Sinkronisasi realtime gagal.",
+            extra={"event": "realtime.failed", "details": {
+                "job": "realtime_sync", "job_id": job_id, "endpoint": "getStationRealKpi",
+                "saved": count, "unprocessed": len(set(codes) - processed),
+                "diagnostic": failure_details(exc),
+                "impact": "Sinkronisasi dihentikan; hanya batch yang sudah commit yang tersimpan.",
+                "evidence": {"table": "public.sync_logs", "job_id": job_id},
+            }},
         )
 
         raise

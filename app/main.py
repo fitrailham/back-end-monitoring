@@ -13,24 +13,19 @@ from app.config import CORS_ORIGINS
 from app.database import fetch_rows
 from app.errors import install_error_handlers
 from app.openapi import install_examples
+from app.logging_config import configure_logging
 
 from app.api import (
     plants,
     monitoring,
     devices,
     alarms,
-    portfolio
+    portfolio,
+    analytics,
 )
 
 
-logging.basicConfig(
-    level=logging.INFO,
-    format=(
-        "%(asctime)s "
-        "%(levelname)s "
-        "%(message)s"
-    )
-)
+configure_logging()
 
 
 app = FastAPI(
@@ -56,7 +51,8 @@ for module in (
     monitoring,
     devices,
     alarms,
-    portfolio
+    portfolio,
+    analytics,
 ):
     app.include_router(module.router)
 

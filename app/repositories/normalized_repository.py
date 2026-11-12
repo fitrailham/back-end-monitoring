@@ -38,6 +38,7 @@ def upsert_source_state(
     stale_after_seconds = stale_after_seconds or config.STALE_AFTER_MINUTES * 60
 
     def write(db):
+        # CASE otherwise infers text for ISO strings; explicitly cast its timestamp branches below.
         db.execute("""
             INSERT INTO public.plant_source_state (
                 plant_code, source_server, api_endpoint, configured,
@@ -47,8 +48,8 @@ def upsert_source_state(
                 fail_code, last_error, updated_at
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s,
-                CASE WHEN %s IN ('success', 'partial') THEN %s END,
-                CASE WHEN %s = 'failed' THEN %s END,
+                CASE WHEN %s IN ('success', 'partial') THEN %s::timestamptz END,
+                CASE WHEN %s = 'failed' THEN %s::timestamptz END,
                 %s, %s, %s, NULL, %s, NOW()
             )
             ON CONFLICT (plant_code, source_server, api_endpoint) DO UPDATE SET

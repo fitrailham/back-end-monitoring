@@ -1,0 +1,12 @@
+@base = http://127.0.0.1:8000
+@plant = PLANT-EXAMPLE-001
+@device = INV-EXAMPLE-1
+
+### Ganti plant/device dengan identitas yang dikembalikan inventory.
+GET {{base}}/api/database/power-statistics?plant_code={{plant}}&from=2026-11-11T17:00:00Z&to=2026-11-12T17:00:00Z&time_zone=Asia/Jakarta&resolution_minutes=10&aggregation=average
+
+### Total laporan sebelum pagination tersedia di response.totals.
+GET {{base}}/api/reports/inverters?plant_code={{plant}}&from=2026-11-11T17:00:00Z&to=2026-11-12T17:00:00Z&time_zone=Asia/Jakarta&grain=hour&page=1&page_size=100
+
+### Ambil seluruh meta.total_pages untuk ekspor perangkat.
+GET {{base}}/api/devices/{{device}}/history?plant_code={{plant}}&from=2026-11-11T17:00:00Z&to=2026-11-12T17:00:00Z&time_zone=Asia/Jakarta&page=1&page_size=1000

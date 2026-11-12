@@ -5,6 +5,57 @@ import math
 from app.services.fusionsolar_client import extract_list
 
 
+REALTIME_KPI_FIELDS = {
+    "pv_power_kw": ("realTimePower", "pv_power_kw"),
+    "load_power_kw": ("load_power_kw",),
+    "grid_power_kw": ("grid_power_kw",),
+    "yield_today_kwh": ("day_power", "yield_today_kwh"),
+    "total_yield_kwh": ("total_power", "total_yield_kwh"),
+    "battery_power_kw": ("battery_power_kw",),
+    "battery_soc_percent": ("battery_soc_percent",),
+    "ess_charge_today_kwh": ("ess_charge_today_kwh",),
+    "ess_discharge_today_kwh": ("ess_discharge_today_kwh",),
+}
+
+
+class NoUsableKpiError(ValueError):
+    """A plant returned a KPI row without any usable numeric metric."""
+
+    def __init__(self, plant_code: str, kpis: dict):
+        self.plant_code = plant_code
+        self.fields = tuple(sorted(str(key) for key in kpis))
+        if not kpis:
+            self.reason_code = "KPI_EMPTY"
+            reason = "dataItemMap kosong"
+            solution = "Periksa ketersediaan telemetry plant dan hak akses KPI pada akun Northbound."
+        elif any(key in kpis for keys in REALTIME_KPI_FIELDS.values() for key in keys):
+            self.reason_code = "KPI_INVALID_VALUES"
+            reason = "semua nilai metrik yang dikenali kosong atau bukan angka valid"
+            solution = "Periksa nilai null, format angka, dan data perangkat pada respons Northbound."
+        elif set(kpis) <= {"real_health_state", "total_income"}:
+            self.reason_code = "KPI_STATUS_ONLY"
+            reason = "tidak ada field metrik yang dikenali; respons hanya berisi status/pendapatan"
+            # Status and income cannot be substituted for power or energy readings.
+            solution = (
+                "Periksa ketersediaan dan izin metrik daya/energi plant di FusionSolar; "
+                "real_health_state dan total_income tidak dipetakan sebagai daya/energi."
+            )
+        else:
+            self.reason_code = "KPI_FIELDS_UNKNOWN"
+            reason = "tidak ada field metrik yang dikenali; periksa mapping Northbound"
+            solution = "Bandingkan nama field dan satuan pada respons mentah dengan mapping Northbound."
+        self.reason = reason
+        self.solution = solution
+        super().__init__(
+            f"[{self.reason_code}] KPI plant {plant_code} tidak dapat digunakan: {reason}. "
+            f"Field diterima: {', '.join(self.fields) or '(tidak ada)'}. Solusi: {solution}"
+        )
+
+    def details(self):
+        return {"code": self.reason_code, "reason": self.reason,
+                "received_fields": list(self.fields), "solution": self.solution}
+
+
 def _number(value):
     if value is None or isinstance(value, bool):
         return None
@@ -18,8 +69,9 @@ def _number(value):
 
 def _first(mapping: dict, *keys):
     for key in keys:
-        if key in mapping and mapping[key] is not None:
-            return _number(mapping[key])
+        value = _number(mapping.get(key))
+        if value is not None:
+            return value
 
     return None
 
@@ -95,51 +147,15 @@ def map_realtime(
         )
 
     mapped = {
-        "pv_power_kw": _first(
-            m, "realTimePower", "pv_power_kw"
-        ),
-
-        "load_power_kw": _first(
-            m, "load_power_kw"
-        ),
-
-        "grid_power_kw": _first(
-            m, "grid_power_kw"
-        ),
-
-        "yield_today_kwh": _first(
-            m, "day_power", "yield_today_kwh"
-        ),
-
-        "total_yield_kwh": _first(
-            m, "total_power", "total_yield_kwh"
-        ),
-
-        "battery_power_kw": _first(
-            m, "battery_power_kw"
-        ),
-
-        "battery_soc_percent": _first(
-            m, "battery_soc_percent"
-        ),
-
-        "ess_charge_today_kwh": _first(
-            m, "ess_charge_today_kwh"
-        ),
-
-        "ess_discharge_today_kwh": _first(
-            m, "ess_discharge_today_kwh"
-        )
+        field: _first(m, *keys)
+        for field, keys in REALTIME_KPI_FIELDS.items()
     }
 
     if all(
         value is None
         for value in mapped.values()
     ):
-        raise ValueError(
-            "KPI tidak memiliki field yang dikenali. "
-            "Periksa mapping Northbound."
-        )
+        raise NoUsableKpiError(plant_code, m)
 
     # Gunakan waktu pengukuran jika tersedia.
     raw_time = (

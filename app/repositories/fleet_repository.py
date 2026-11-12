@@ -118,6 +118,7 @@ def fleet(plant_code: str | None = None):
                     'data', jsonb_agg(
                         COALESCE(x.raw_data, '{}'::jsonb) || jsonb_strip_nulls(jsonb_build_object(
                             'device_id', x.vendor_device_id,
+                            'device_key', x.id::text,
                             'device_sn', x.device_sn,
                             'device_name', x.device_name,
                             'stationCode', x.plant_code,

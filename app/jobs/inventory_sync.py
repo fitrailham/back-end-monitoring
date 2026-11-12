@@ -5,6 +5,7 @@ import logging
 from app import config
 from app.repositories import normalized_repository, plant_repository, raw_repository, sync_repository
 from app.services.fusionsolar_client import complete_list, extract_list
+from app.services.sync_diagnostics import failure_details
 
 log = logging.getLogger(__name__)
 
@@ -57,5 +58,8 @@ def run(client):
             except Exception:
                 log.exception("[INVENTORY SYNC] Failed to update source state for %s", code)
         sync_repository.finish_job(job_id, False, count, str(exc))
-        log.exception("[INVENTORY SYNC] Failed")
+        log.exception("Sinkronisasi inventory gagal.", extra={"event": "inventory.failed", "details": {
+            "job": "inventory_sync", "job_id": job_id, "saved": count,
+            "diagnostic": failure_details(exc),
+        }})
         raise

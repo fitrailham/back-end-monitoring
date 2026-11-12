@@ -196,6 +196,10 @@ class Device(Contract):
     device_id: str | None
     device_sn: str | None
     device_name: str | None
+    device_key: str | None = None
+    software_version: str | None = None
+    parent_device_id: str | None = None
+    parent_device_name: str | None = None
     plant_code: str
     vendor_device_type_id: int | str | None
     model: str | None = None
