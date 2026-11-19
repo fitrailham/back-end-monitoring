@@ -44,20 +44,17 @@ def save_snapshot(snapshot: dict, conn=None):
 
             ON CONFLICT (plant_code, recorded_at)
             DO UPDATE SET
-                pv_power_kw = EXCLUDED.pv_power_kw,
-                load_power_kw = EXCLUDED.load_power_kw,
-                grid_power_kw = EXCLUDED.grid_power_kw,
-                yield_today_kwh = EXCLUDED.yield_today_kwh,
-                total_yield_kwh = EXCLUDED.total_yield_kwh,
-                battery_power_kw = EXCLUDED.battery_power_kw,
-                battery_soc_percent =
-                    EXCLUDED.battery_soc_percent,
-                ess_charge_today_kwh =
-                    EXCLUDED.ess_charge_today_kwh,
-                ess_discharge_today_kwh =
-                    EXCLUDED.ess_discharge_today_kwh,
+                pv_power_kw = COALESCE(EXCLUDED.pv_power_kw, plant_realtime.pv_power_kw),
+                load_power_kw = COALESCE(EXCLUDED.load_power_kw, plant_realtime.load_power_kw),
+                grid_power_kw = COALESCE(EXCLUDED.grid_power_kw, plant_realtime.grid_power_kw),
+                yield_today_kwh = COALESCE(EXCLUDED.yield_today_kwh, plant_realtime.yield_today_kwh),
+                total_yield_kwh = COALESCE(EXCLUDED.total_yield_kwh, plant_realtime.total_yield_kwh),
+                battery_power_kw = COALESCE(EXCLUDED.battery_power_kw, plant_realtime.battery_power_kw),
+                battery_soc_percent = COALESCE(EXCLUDED.battery_soc_percent, plant_realtime.battery_soc_percent),
+                ess_charge_today_kwh = COALESCE(EXCLUDED.ess_charge_today_kwh, plant_realtime.ess_charge_today_kwh),
+                ess_discharge_today_kwh = COALESCE(EXCLUDED.ess_discharge_today_kwh, plant_realtime.ess_discharge_today_kwh),
                 data_source = EXCLUDED.data_source,
-                raw_data = EXCLUDED.raw_data
+                raw_data = COALESCE(plant_realtime.raw_data, '{}'::jsonb) || jsonb_strip_nulls(EXCLUDED.raw_data)
         """, (
             snapshot["plant_code"],
             snapshot["recorded_at"],

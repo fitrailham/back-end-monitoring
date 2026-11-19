@@ -139,6 +139,8 @@ class SmartLogHandler(logging.Handler):
 
 
 def configure_scheduler_logging():
+    # HTTP transport debug traces can include cookies and authentication headers.
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     level, time_zone = log_settings()
     root = logging.getLogger()
     handlers = {handler.get_name(): handler for handler in root.handlers}

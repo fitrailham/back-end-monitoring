@@ -6,6 +6,7 @@ import httpx
 import psycopg
 
 from app.services.fusionsolar_client import FusionSolarError, NorthboundRateLimitError
+from app.sync_runtime import JobDeadlineExceeded, WorkerConnectionLost
 
 
 def failure_details(exc: Exception) -> dict:
@@ -16,6 +17,10 @@ def failure_details(exc: Exception) -> dict:
 
 
 def failure_guidance(exc: Exception) -> str:
+    if isinstance(exc, JobDeadlineExceeded):
+        return "[JOB_TIMEOUT] Job mencapai batas waktu. Solusi: periksa latensi Huawei dan PostgreSQL di log audit."
+    if isinstance(exc, WorkerConnectionLost):
+        return "[DB_CONNECTION] Sesi PostgreSQL scheduler terputus. Solusi: periksa koneksi atau SSH tunnel."
     if isinstance(exc, NorthboundRateLimitError):
         return (
             f"[API_QUOTA] Northbound membatasi endpoint {exc.endpoint} dengan failCode=407. "

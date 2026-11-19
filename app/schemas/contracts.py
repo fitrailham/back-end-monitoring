@@ -512,6 +512,26 @@ class SyncLogsResponse(Contract):
     data: list[SyncLog]
 
 
+class SourceFreshness(Contract):
+    api_endpoint: str
+    configured: bool
+    expected_plants: int
+    fresh: int
+    stale: int
+    partial: int
+    failed: int
+    missing: int
+    unconfigured: int
+    last_attempt_at: datetime | None
+    last_success_at: datetime | None
+    checked_at: datetime
+
+
+class SyncHealthResponse(Contract):
+    success: bool = True
+    data: list[SourceFreshness]
+
+
 class RegisterPlant(Contract):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False, str_strip_whitespace=True)
     plant_code: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_=.:\-]+$")

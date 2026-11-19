@@ -8,7 +8,8 @@ from app.auth import require_admin
 from app.errors import ApiException, ERROR_RESPONSES
 from app.repositories import sync_repository
 from app.schemas.contracts import (DeviceType, Grain, ListResponse, PlantOverview,
-    PlantStatus, RankingsResponse, YieldStatisticsResponse, HistoryResponse, DashboardResponse, SyncLogsResponse)
+    PlantStatus, RankingsResponse, YieldStatisticsResponse, HistoryResponse, DashboardResponse, SyncLogsResponse,
+    SyncHealthResponse)
 from app.services import fleet_service, monitoring_service, portfolio_service, statistics_service
 
 router = APIRouter(tags=["Monitoring"], responses=ERROR_RESPONSES)
@@ -84,3 +85,8 @@ def dashboard(plant_code: str):
 @router.get("/api/database/sync-logs", response_model=SyncLogsResponse, dependencies=[Depends(require_admin)])
 def sync_logs(limit: int = Query(default=20, ge=1, le=100)):
     return {"success": True, "data": sync_repository.recent_jobs(limit)}
+
+
+@router.get("/api/database/sync-health", response_model=SyncHealthResponse, dependencies=[Depends(require_admin)])
+def sync_health():
+    return {"success": True, "data": sync_repository.source_freshness()}

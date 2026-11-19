@@ -1,10 +1,12 @@
 import subprocess
 import sys
+from threading import Event
 from unittest.mock import MagicMock, Mock
 
 from app.scheduler import scheduler
 from app.scheduler.worker_lock import SchedulerAlreadyRunning, scheduler_lock
 from app.services.fusionsolar_client import NorthboundRateLimitError
+from app.sync_runtime import remaining_time
 
 
 def test_os_lock_excludes_another_process_and_releases_after_exit(tmp_path):
@@ -62,10 +64,12 @@ def test_inventory_login_quota_skips_other_jobs_and_retries_next_cycle(monkeypat
             devices.assert_not_called()
             alarms.assert_not_called()
         else:
-            raise KeyboardInterrupt
-    monkeypatch.setattr(scheduler.time, "sleep", wait)
+            return True
+    stop = Mock()
+    stop.is_set.return_value = False
+    stop.wait.side_effect = wait
 
-    scheduler._run()
+    scheduler._run(stop)
 
     assert sleeps == [1200, 600]
     assert inventory.call_count == 2
@@ -74,3 +78,25 @@ def test_inventory_login_quota_skips_other_jobs_and_retries_next_cycle(monkeypat
     assert event.details["job"] == "inventory_sync"
     assert event.details["endpoint"] == "login"
     assert event.details["diagnostic"]["code"] == "API_QUOTA"
+
+
+def test_shutdown_during_realtime_skips_later_jobs(monkeypatch):
+    stop = Event()
+    client = MagicMock()
+    monkeypatch.setenv("FUSIONSOLAR_ENABLED", "true")
+    monkeypatch.setattr(scheduler, "FusionSolarClient", lambda: client)
+    monkeypatch.setattr(scheduler.plant_sync, "run", Mock())
+    monkeypatch.setattr(scheduler.inventory_sync, "run", Mock())
+
+    def realtime(_):
+        stop.set()
+        remaining_time()
+
+    monkeypatch.setattr(scheduler.realtime_sync, "run", realtime)
+    devices, alarms = Mock(), Mock()
+    monkeypatch.setattr(scheduler.device_realtime_sync, "run", devices)
+    monkeypatch.setattr(scheduler.alarm_sync, "run", alarms)
+    scheduler._run(stop)
+    devices.assert_not_called()
+    alarms.assert_not_called()
+    client.__exit__.assert_called_once()

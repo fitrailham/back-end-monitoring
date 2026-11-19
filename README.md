@@ -51,8 +51,10 @@ Do not commit `.env` or include passwords or tokens in the README.
 - Monitoring overview: `GET /api/database/overview`
 - Dashboard: `GET /api/dashboard/{plant_code}`
 - Synchronization history: `GET /api/database/sync-logs`
+- Source freshness: `GET /api/database/sync-health`
 
-Use `--reload` for local development.
+Use `--reload` for local development. For multiple API workers, use
+`uvicorn app.main:app --workers 2` with the existing host and port settings.
 
 ## One-time Database Synchronization
 
@@ -61,10 +63,12 @@ to the database configured in `.env`:
 
 ```powershell
 @"
+from app import config
 from app.jobs import plant_sync, realtime_sync
+from app.scheduler.worker_lock import postgres_scheduler_lock, scheduler_lock
 from app.services.fusionsolar_client import FusionSolarClient
 
-with FusionSolarClient() as client:
+with scheduler_lock(config.PROJECT_ROOT / ".scheduler.lock"), postgres_scheduler_lock(30), FusionSolarClient() as client:
     print("Plants saved:", plant_sync.run(client))
     print("KPI snapshots saved:", realtime_sync.run(client))
 "@ | .\.venv\Scripts\python.exe -
@@ -91,28 +95,50 @@ error. No additional Northbound requests are made for skipped plants.
 Set `FUSIONSOLAR_ENABLED=true` in `.env`, then run this in a separate terminal:
 
 ```powershell
-.\.venv\Scripts\python.exe -m app.scheduler.scheduler
+.\.venv\Scripts\python.exe -m app.scheduler
 ```
 
 The worker retrieves the plant list at startup, then station KPIs and alarms on each cycle.
 The interval follows `SYNC_INTERVAL_MINUTES`, with a minimum of 10 minutes.
-Restart the worker after changing Python code: stop the existing scheduler with
-`Ctrl+C`, then run the command above again. The scheduler does not hot-reload
-imported modules. If source files change while it runs, a traceback can display
-new source lines even though the process is still executing the old code.
-The startup `Runtime` message identifies the PID, interpreter, and realtime
-module path so the running checkout can be verified.
-Only one scheduler may run per checkout. A second instance exits before login
-with `[WORKER_DUPLICATE]`. `.scheduler.lock` is an OS-held lock; a leftover file
-does not mean a worker is active, and must not be deleted while a worker runs.
-This local guard does not cover other computers or applications sharing the
-same Northbound account; use one collector per account or separate accounts.
+The legacy command `python -m app.scheduler.scheduler` uses the same entry point.
+Stop the scheduler with `Ctrl+C` or `SIGTERM`, then start it again to load code
+or configuration changes. The API can serve cached data during the restart.
+
+The worker holds a local `.scheduler.lock` and a PostgreSQL advisory lock for
+its database. It uses the lock-owning PostgreSQL session for synchronization
+transactions. A competing worker exits before Huawei login. Use a session-affine
+PostgreSQL connection such as the existing SSH tunnel. Keep one collector per
+Northbound account across separate databases and external apps.
+
+`SCHEDULER_JOB_TIMEOUT_SECONDS` sets a cooperative job deadline (600 seconds
+by default). `SCHEDULER_DB_TIMEOUT_SECONDS` limits scheduler statements (30
+seconds by default). HTTP requests retain their 25-second per-phase limit and use
+the remaining job budget when shorter. Shutdown cancels at an I/O checkpoint.
+The open batch rolls back and committed batches are retained.
+
+Use a dashboard admin session for both monitoring routes. `sync-logs` reads
+job history, including expired `RUNNING` jobs marked as interrupted.
+`sync-health` reports source freshness, coverage, and last successful
+collection from `plant_source_state`.
+
 Alarm synchronization is skipped when `FUSIONSOLAR_ALARMS_PATH` is empty.
 Device inventory is refreshed at startup and every 24 hours. Device realtime KPI
 remains disabled until `FUSIONSOLAR_DEVICE_REALTIME_ENABLED=true` because it consumes
 additional Northbound quota. Signed grid/battery power remains null until
 `FUSIONSOLAR_POWER_DIRECTION_CONVENTION=grid_import_battery_discharge_positive` is
 explicitly configured after the source sign has been verified.
+
+### Rollout and rollback
+
+Stop the existing scheduler before deploying the updated worker. Start the API
+with its usual Uvicorn command and start one scheduler. Verify `/api/database/sync-logs`
+and `/api/database/sync-health` after a cycle. Keep the existing connection
+settings and feature flags during rollout.
+
+To roll back, stop the updated scheduler, restore the previous release and its
+environment settings, then start it with its original command. Restore the
+API release independently if needed. Both releases use the existing PostgreSQL
+schema and stored snapshots.
 
 ## Troubleshooting
 

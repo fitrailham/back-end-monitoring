@@ -21,12 +21,13 @@ def inverter_power(codes):
             FROM public.device_realtime x
             WHERE x.device_id = d.id AND x.plant_code = d.plant_code
               AND x.source_endpoint = 'getDevRealKpi'
-            ORDER BY x.collected_at DESC, x.id DESC LIMIT 1
+              AND x.active_power_kw >= 0 AND x.active_power_kw::text NOT IN ('NaN', 'Infinity')
+            ORDER BY x.measurement_time_verified DESC, x.collected_at DESC, x.id DESC LIMIT 1
         ) k ON TRUE
         WHERE d.device_type = 'inverter' AND d.inventory_collected_at = d.latest_inventory
         ORDER BY d.plant_code, COALESCE(NULLIF(BTRIM(d.device_sn), ''),
                                        d.source_server || ':' || d.vendor_device_id),
-                 k.collected_at DESC NULLS LAST, d.id DESC
+                 k.measurement_time_verified DESC NULLS LAST, k.collected_at DESC NULLS LAST, d.id DESC
     """, (codes,))
 
 

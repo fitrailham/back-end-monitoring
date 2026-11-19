@@ -1,17 +1,9 @@
 """Real PostgreSQL auth tests in an isolated temporary cluster, never the app DB."""
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from datetime import timedelta
-import os
-from pathlib import Path
-import shutil
-import socket
-import subprocess
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
-import psycopg
-from psycopg.rows import dict_row
 import pytest
 
 from app import config, manage_auth
@@ -21,46 +13,6 @@ from app.main import app
 from app.repositories import auth_repository, fleet_repository, plant_admin_repository
 from app.security import hash_password, token_hash, verify_password
 from app.services.values import utc_now
-
-
-@pytest.fixture(scope="module")
-def auth_postgres(tmp_path_factory):
-    # Use installed binaries, or set TEST_POSTGRES_BIN. No existing database is reused.
-    fallback = "C:/Program Files/PostgreSQL/17/bin" if os.name == "nt" else ""
-    binary = Path(os.getenv("TEST_POSTGRES_BIN", fallback))
-    initdb = str(binary / ("initdb.exe" if os.name == "nt" else "initdb")) if binary.is_dir() else shutil.which("initdb")
-    pgctl = str(binary / ("pg_ctl.exe" if os.name == "nt" else "pg_ctl")) if binary.is_dir() else shutil.which("pg_ctl")
-    if not initdb or not pgctl or not Path(initdb).exists() or not Path(pgctl).exists():
-        pytest.skip("PostgreSQL binaries unavailable; set TEST_POSTGRES_BIN for isolated integration tests")
-    temp = tmp_path_factory.mktemp("auth-postgres")
-    data = temp / "data"
-    kwargs = {"check": True, "capture_output": True, "text": True}
-    if os.name == "nt":
-        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-    subprocess.run([initdb, "-D", str(data), "-U", "auth_test", "-A", "trust", "--encoding=UTF8", "--no-locale"], **kwargs)
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-    options = f"-h 127.0.0.1 -p {port} -F"
-    if os.name != "nt":
-        options += f" -k {temp}"
-    # pg_ctl's detached Windows child inherits pipe handles; avoid capture_output
-    # on daemon startup so communicate() cannot wait forever for EOF.
-    daemon_kwargs = {k: v for k, v in kwargs.items() if k != "capture_output"}
-    daemon_kwargs.update(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45)
-    subprocess.run([pgctl, "-D", str(data), "-l", str(temp / "postgres.log"), "-o", options, "-w", "start"], **daemon_kwargs)
-    try:
-        @contextmanager
-        def connect():
-            with psycopg.connect(host="127.0.0.1", port=port, dbname="postgres", user="auth_test", row_factory=dict_row) as conn:
-                yield conn
-        with connect() as conn:
-            conn.execute("CREATE TABLE public.plants (plant_code text PRIMARY KEY)")
-            conn.execute("INSERT INTO public.plants VALUES ('A'), ('B')")
-            conn.execute((config.PROJECT_ROOT / "migrations/002_auth.sql").read_text(encoding="utf-8"))
-        yield connect
-    finally:
-        subprocess.run([pgctl, "-D", str(data), "-m", "fast", "-w", "stop"], **daemon_kwargs)
 
 
 @pytest.fixture(scope="module")

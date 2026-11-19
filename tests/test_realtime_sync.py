@@ -230,10 +230,12 @@ def test_scheduler_continues_device_and_alarm_jobs_after_unusable_station_kpi(mo
     device_sync, alarm_sync = Mock(), Mock()
     monkeypatch.setattr(scheduler.device_realtime_sync, "run", device_sync)
     monkeypatch.setattr(scheduler.alarm_sync, "run", alarm_sync)
-    monkeypatch.setattr(scheduler.time, "sleep", Mock(side_effect=KeyboardInterrupt))
+    stop = Mock()
+    stop.is_set.return_value = False
+    stop.wait.return_value = True
 
     # Test the cycle independently from a real worker holding the checkout lock.
-    scheduler._run()
+    scheduler._run(stop)
 
     device_sync.assert_called_once_with(client)
     alarm_sync.assert_called_once_with(client)

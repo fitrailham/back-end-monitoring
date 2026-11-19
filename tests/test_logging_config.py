@@ -72,15 +72,18 @@ def test_scheduler_smart_output_and_json_audit_are_separate(monkeypatch, tmp_pat
     monkeypatch.setattr(sys, "stdout", terminal)
     monkeypatch.setattr(terminal_logging, "AUDIT_PATH", audit_file)
     monkeypatch.setenv("LOG_FORMAT", "pretty_json")
-    monkeypatch.setenv("LOG_LEVEL", "INFO")
+    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
     monkeypatch.setenv("FORCE_COLOR", "1")
     monkeypatch.delenv("TTY_COMPATIBLE", raising=False)
     root = logging.getLogger()
     previous_level, previous_handlers = root.level, root.handlers[:]
+    transport = logging.getLogger("httpcore")
+    previous_transport_level = transport.level
     log = logging.getLogger("app.scheduler.scheduler")
     try:
         terminal_logging.configure_scheduler_logging()
         terminal_logging.configure_scheduler_logging()
+        logging.getLogger("httpcore.http11").debug("XSRF-TOKEN: fixture-only-token")
         log.info("[SCHEDULER] Cycle completed")
         logging.getLogger("app.jobs.realtime_sync").warning(
             "Snapshot KPI dilewati.",
@@ -105,6 +108,7 @@ def test_scheduler_smart_output_and_json_audit_are_separate(monkeypatch, tmp_pat
             if handler not in root.handlers:
                 root.addHandler(handler)
         root.setLevel(previous_level)
+        transport.setLevel(previous_transport_level)
 
     success, warning, error = terminal.getvalue().splitlines()
     assert re.fullmatch(r"\[\d{2}:\d{2}:\d{2}\] SUCCESS SCHEDULER Cycle completed", success)

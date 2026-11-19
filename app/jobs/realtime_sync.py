@@ -11,6 +11,7 @@ from app.repositories import (
 
 from app.services.kpi_mapper import NoUsableKpiError, map_realtime
 from app.services.sync_diagnostics import failure_details
+from app.sync_runtime import JobInterrupted
 
 
 log = logging.getLogger(__name__)
@@ -137,7 +138,8 @@ def run(client, plant_code: str | None = None) -> int:
 
     except Exception as exc:
 
-        for code in codes:
+        pending = () if isinstance(exc, JobInterrupted) else codes
+        for code in pending:
             if code in processed:
                 continue
             try:

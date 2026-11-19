@@ -5,9 +5,27 @@ import errno
 import os
 from pathlib import Path
 
+from app.database import open_db, use_worker_connection
+
 
 class SchedulerAlreadyRunning(RuntimeError):
     pass
+
+
+@contextmanager
+def postgres_scheduler_lock(statement_timeout_seconds):
+    """Hold the PostgreSQL lease on the same session used for scheduler writes."""
+    with open_db() as connection:
+        connection.autocommit = True
+        connection.execute("SELECT set_config('statement_timeout', %s, false)",
+                           (f"{statement_timeout_seconds}s",))
+        acquired = connection.execute(
+            "SELECT pg_try_advisory_lock(%s, %s) AS acquired", (0x4943474E, 1)
+        ).fetchone()["acquired"]
+        if not acquired:
+            raise SchedulerAlreadyRunning("Scheduler lain sedang berjalan pada database ini")
+        with use_worker_connection(connection, statement_timeout_seconds):
+            yield
 
 
 @contextmanager

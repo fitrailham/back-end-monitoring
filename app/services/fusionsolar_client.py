@@ -3,9 +3,12 @@ import os
 import time
 import math
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 import httpx
 
 from dotenv import load_dotenv
+from app.database import verify_worker_connection
+from app.sync_runtime import remaining_time
 
 load_dotenv()
 
@@ -24,6 +27,13 @@ class NorthboundRateLimitError(FusionSolarError):
         )
 
 
+def _error_code(payload):
+    if not isinstance(payload, dict):
+        return "invalid-json"
+    code = str(payload.get("failCode"))
+    return code if code.isascii() and code.isdecimal() else "unknown"
+
+
 class FusionSolarClient:
 
     def __init__(self):
@@ -32,9 +42,11 @@ class FusionSolarClient:
             "FUSIONSOLAR_BASE_URL", ""
         ).rstrip("/")
 
-        if not base.startswith("https://"):
+        address = urlsplit(base)
+        if (address.scheme != "https" or not address.hostname or address.username is not None
+                or address.query or address.fragment):
             raise FusionSolarError(
-                "FUSIONSOLAR_BASE_URL wajib HTTPS"
+                "FUSIONSOLAR_BASE_URL wajib berupa URL HTTPS tanpa kredensial, query, atau fragmen."
             )
 
         self.base = (
@@ -91,10 +103,19 @@ class FusionSolarClient:
             self._quota_until = time.monotonic() + self.quota_cooldown_seconds
             raise NorthboundRateLimitError(endpoint, self.quota_cooldown_seconds)
 
+    def _request(self, url, **kwargs):
+        verify_worker_connection()
+        remaining = remaining_time()
+        if remaining is not None:
+            kwargs["timeout"] = min(25, remaining)
+        response = self.http.post(url, **kwargs)
+        remaining_time()
+        return response
+
     def login(self):
 
         self._check_quota_cooldown()
-        response = self.http.post(
+        response = self._request(
             self.base + "/login",
             json={
                 "userName": self.username,
@@ -109,7 +130,7 @@ class FusionSolarClient:
         if not isinstance(payload, dict) or payload.get("success") is not True:
             raise FusionSolarError(
                 "Login Northbound gagal, failCode="
-                f"{payload.get('failCode') if isinstance(payload, dict) else 'invalid-json'}"
+                f"{_error_code(payload)}"
             )
 
         token = (
@@ -152,7 +173,7 @@ class FusionSolarClient:
         # Vendor failCode 305 means the session is no longer authenticated.
         # Retry once after login; never retry quota/permission failures blindly.
         for attempt in range(2):
-            response = self.http.post(
+            response = self._request(
                 f"{self.base}/{path}",
                 headers={"XSRF-TOKEN": self.token},
                 json=body or {},
@@ -171,11 +192,7 @@ class FusionSolarClient:
             not isinstance(payload, dict)
             or payload.get("success") is not True
         ):
-            code = (
-                payload.get("failCode")
-                if isinstance(payload, dict)
-                else "invalid-json"
-            )
+            code = _error_code(payload)
 
             raise FusionSolarError(
                 f"Northbound {path} gagal, failCode={code}"

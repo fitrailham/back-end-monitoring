@@ -1,20 +1,5 @@
-import psycopg
-from psycopg.rows import dict_row
-
-from app import config
+from app.database import db_session as open_db
 from app.database import fetch_rows
-
-
-def open_db():
-    return psycopg.connect(
-        host=config.DB_HOST,
-        port=config.DB_PORT,
-        dbname=config.DB_NAME,
-        user=config.DB_USER,
-        password=config.DB_PASSWORD,
-        connect_timeout=10,
-        row_factory=dict_row,
-    )
 
 
 def list_plants():

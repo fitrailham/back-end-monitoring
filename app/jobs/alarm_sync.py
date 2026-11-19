@@ -11,6 +11,7 @@ from app.repositories import (
 )
 from app.services.alarm_service import normalize_alarm
 from app.services.fusionsolar_client import complete_list, extract_list
+from app.sync_runtime import JobInterrupted
 
 
 log = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ def run(client) -> int:
     except Exception as exc:
 
         failed_code = plant.get("plant_code") if "plant" in locals() else None
-        if failed_code:
+        if failed_code and not isinstance(exc, JobInterrupted):
             try:
                 normalized_repository.upsert_source_state(
                     failed_code, path, configured=True, status="failed",
