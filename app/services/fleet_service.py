@@ -4,6 +4,7 @@ import json
 import math
 
 from app import config
+from app.auth import allowed_plant_codes
 from app.errors import ApiException
 from app.repositories import fleet_repository
 from app.repositories.realtime_repository import METRIC_FIELDS
@@ -153,7 +154,13 @@ def normalize(row, now=None):
 
 
 def get_rows(plant_code=None):
-    return fleet_repository.fleet(plant_code)
+    codes = allowed_plant_codes()
+    if codes is not None and plant_code is not None and plant_code not in codes:
+        raise ApiException(403, "PLANT_ACCESS_DENIED", "Anda tidak memiliki akses ke PLTS ini.")
+    if codes == []:
+        return []
+    rows = fleet_repository.fleet(plant_code, allowed_codes=codes) if codes is not None else fleet_repository.fleet(plant_code)
+    return rows if codes is None else [r for r in rows if r["plant_code"] in codes]
 
 
 def filter_rows(rows, search=None, country_code=None, region=None, device_type=None, device_sn=None, status=None):

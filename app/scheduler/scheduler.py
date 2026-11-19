@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 from app import config
 from app.services.sync_diagnostics import failure_details
-from app.logging_config import configure_logging
+from app.scheduler.terminal_logging import configure_scheduler_logging
 from app.services.fusionsolar_client import (
     FusionSolarClient, NorthboundRateLimitError
 )
@@ -24,8 +24,6 @@ from app.jobs import (
 
 
 load_dotenv()
-
-configure_logging()
 
 log = logging.getLogger(__name__)
 
@@ -170,4 +168,5 @@ def _run():
 
 
 if __name__ == "__main__":
+    configure_scheduler_logging()
     main()

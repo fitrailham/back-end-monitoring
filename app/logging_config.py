@@ -49,14 +49,19 @@ class JsonLogFormatter(logging.Formatter):
                           indent=2 if self.pretty else None, default=str)
 
 
+def log_settings():
+    level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").strip().upper(), None)
+    if not isinstance(level, int):
+        raise ValueError("LOG_LEVEL tidak valid")
+    return level, os.getenv("LOG_TIME_ZONE", "Asia/Jakarta")
+
+
 def configure_logging():
     log_format = os.getenv("LOG_FORMAT", "pretty_json").strip().lower()
     if log_format not in {"pretty_json", "json"}:
         raise ValueError("LOG_FORMAT harus pretty_json atau json")
-    level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").strip().upper(), None)
-    if not isinstance(level, int):
-        raise ValueError("LOG_LEVEL tidak valid")
-    formatter = JsonLogFormatter(pretty=log_format == "pretty_json", time_zone=os.getenv("LOG_TIME_ZONE", "Asia/Jakarta"))
+    level, time_zone = log_settings()
+    formatter = JsonLogFormatter(pretty=log_format == "pretty_json", time_zone=time_zone)
     root = logging.getLogger()
     # Keep other owners' handlers (for example pytest caplog); manage only our own.
     handler = next((h for h in root.handlers if h.get_name() == "icongreen_json"), None)

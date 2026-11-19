@@ -37,11 +37,10 @@ def rows():
 
 
 @pytest.fixture
-def client(monkeypatch, rows):
+def client(monkeypatch, rows, authenticated_admin):
     monkeypatch.setattr(fleet_service, "get_rows", lambda code=None: [r for r in rows if code is None or r["plant_code"] == code])
     monkeypatch.setattr(config, "FUSIONSOLAR_ALARMS_PATH", "")
-    monkeypatch.setattr(config, "PLANT_WRITE_TOKEN", "")
-    with TestClient(app) as client:
+    with TestClient(app, **authenticated_admin) as client:
         yield client
 
 
@@ -148,16 +147,16 @@ def registration():
             "time_zone": "Asia/Makassar", "latitude": -8.6, "longitude": 115.1}
 
 
-def test_write_disabled_and_requires_token(client, monkeypatch):
+def test_write_requires_session_and_csrf(client, monkeypatch):
     monkeypatch.setattr(plant_admin_repository, "insert_plant", lambda payload: pytest.fail("Must not write"))
+    client.headers.pop("X-CSRF-Token")
     assert client.post("/api/database/plants", json=registration()).status_code == 403
-    monkeypatch.setattr(config, "PLANT_WRITE_TOKEN", "test-token")
+    client.cookies.clear()
     assert client.post("/api/database/plants", json=registration()).status_code == 401
 
 
 def test_register_success_conflict_and_validation(client, monkeypatch):
-    monkeypatch.setattr(config, "PLANT_WRITE_TOKEN", "test-token")
-    headers = {"Authorization": "Bearer test-token"}
+    headers = {}
     saved = []
     monkeypatch.setattr(plant_admin_repository, "insert_plant", saved.append)
     response = client.post("/api/database/plants", json=registration(), headers=headers)

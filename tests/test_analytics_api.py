@@ -34,7 +34,7 @@ def power_sample(minutes, value=0, verified=True):
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, authenticated_admin):
     monkeypatch.setattr(fleet_service, "get_rows", lambda code=None: [{"plant_code": "P", "is_demo": False}] if code in (None, "P") else [])
     monkeypatch.setattr(analytics_service, "utc_now", lambda: NOW)
     monkeypatch.setattr(repository, "plant_power_samples", lambda *args: [])
@@ -42,7 +42,7 @@ def client(monkeypatch):
     monkeypatch.setattr(repository, "device_counter_samples", lambda *args: [])
     monkeypatch.setattr(repository, "device", lambda plant, device: inverter(1) if (plant, device) == ("P", "V1") else None)
     monkeypatch.setattr(repository, "device_history", lambda *args: ([], 0))
-    with TestClient(app) as client:
+    with TestClient(app, **authenticated_admin) as client:
         yield client
 
 

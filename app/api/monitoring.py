@@ -1,9 +1,10 @@
 from datetime import date as Date, datetime
 from typing import Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app import config
+from app.auth import require_admin
 from app.errors import ApiException, ERROR_RESPONSES
 from app.repositories import sync_repository
 from app.schemas.contracts import (DeviceType, Grain, ListResponse, PlantOverview,
@@ -80,6 +81,6 @@ def dashboard(plant_code: str):
     return legacy
 
 
-@router.get("/api/database/sync-logs", response_model=SyncLogsResponse)
+@router.get("/api/database/sync-logs", response_model=SyncLogsResponse, dependencies=[Depends(require_admin)])
 def sync_logs(limit: int = Query(default=20, ge=1, le=100)):
     return {"success": True, "data": sync_repository.recent_jobs(limit)}

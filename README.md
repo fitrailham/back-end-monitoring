@@ -146,15 +146,17 @@ Scheduler errors identify the failing job and give guidance for API quota/sessio
 network, database connection/schema/type errors. Tracebacks remain available for
 diagnosis. Raw evidence IDs are logged only after a successful database commit.
 
-### Format log JSON
+### Log Scheduler FusionSolar
 
-Log aplikasi/scheduler memakai JSON terstruktur. Default `LOG_FORMAT=pretty_json`
-memberikan indentasi untuk terminal; `LOG_FORMAT=json` memberi satu objek JSON
-per baris (JSON Lines) untuk penyimpanan/pemrosesan otomatis. Setiap event adalah
-satu objek tersendiri, bukan satu array JSON untuk seluruh file. Level default
-`LOG_LEVEL=INFO` dan zona timestamp `LOG_TIME_ZONE=Asia/Jakarta` dapat diatur di
-`.env`. Restart proses terkait sekali untuk memuat perubahan konfigurasi/kode;
-jangan menjalankan worker tambahan.
+Terminal scheduler menampilkan `[HH:mm:ss] LEVEL COMPONENT MESSAGE` melalui Rich.
+`SUCCESS` berwarna hijau, `WARNING` kuning, dan `ERROR` merah pada terminal yang
+mendukung warna. Saat stdout diarahkan ke file, format yang sama memakai teks
+polos. Audit tersimpan di `logs/scheduler.audit.jsonl` sebagai satu objek JSON
+lengkap per baris.
+
+`LOG_LEVEL` (default `INFO`) dan `LOG_TIME_ZONE` (default `Asia/Jakarta`) berlaku
+untuk terminal dan audit. API tetap memakai `LOG_FORMAT=pretty_json` atau
+`LOG_FORMAT=json`.
 
 `realtime.snapshot_skipped` memisahkan `job_id`, `plant_code`, `endpoint`,
 `diagnostic.code/reason/received_fields/solution`, `impact`, dan referensi
@@ -187,9 +189,26 @@ terpisah setelah memeriksa target database pada `.env`:
 
 Migrasi hanya menambahkan indeks dan tidak mengisi data. API membaca `plant_metadata`
 dan `devices`, dengan fallback ke cache legacy selama tabel baru masih kosong.
-POST/PATCH memerlukan tabel baru dan `PLANT_WRITE_TOKEN` yang
-tidak kosong, dikirim melalui `Authorization: Bearer <token>`. Jangan menanamkan token
-administrator ke bundle frontend publik. Tanpa token konfigurasi, operasi tulis ditolak.
+Endpoint data sekarang memerlukan sesi login. POST/PATCH metadata PLTS memerlukan
+role admin dan `X-CSRF-Token`; token statis `PLANT_WRITE_TOKEN` sudah digantikan.
+
+## Dashboard login
+
+Kontrak, contoh request/response, CSRF, CORS, dan konfigurasi produksi tersedia di
+[docs/auth-api.md](docs/auth-api.md). Swagger tersedia di `/docs`.
+
+Setelah koneksi PostgreSQL/SSH tunnel aktif, jalankan migrasi dan buat akun awal:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.manage_auth migrate
+.\.venv\Scripts\python.exe -m app.manage_auth seed --viewer-plant "KODE_PLTS_YANG_ADA" --credentials-file .env.auth-accounts.local
+```
+
+Ganti kode PLTS dengan kode aktual; ulangi `--viewer-plant` untuk beberapa PLTS.
+Admin dapat mengakses semua PLTS; viewer hanya mendapat PLTS yang ditugaskan.
+File kredensial lokal dikecualikan Git dan dibatasi untuk pengguna OS yang membuatnya.
+Password tidak dicetak. Seed menolak menimpa akun yang sudah ada. Tanpa opsi file,
+script meminta password lewat prompt tersembunyi. Migrasi dan seed tidak berjalan otomatis.
 
 Worker memperbarui inventory perangkat saat startup dan setiap 24 jam.
 Metadata inventory tidak digunakan sebagai bukti freshness telemetry.

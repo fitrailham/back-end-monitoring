@@ -98,6 +98,7 @@ def test_per_plant_alarm_query_filters_and_paginates(client, rows, monkeypatch):
 
 
 def test_statistics_proposal_aliases_and_bucket_coverage(client, monkeypatch):
+    monkeypatch.setattr(fleet_repository, "energy_statistics", lambda *args: [])
     start = datetime(2026, 11, 8, tzinfo=timezone.utc)
     readings = [{"plant_code": "P00", "recorded_at": start + timedelta(minutes=i),
                  "total_yield_kwh": 100+i, "timestamp_source": "device", "data_source": "FUSIONSOLAR"}
@@ -136,9 +137,8 @@ def test_telemetry_unavailable_has_retry_metadata_without_discarding_cache(clien
 
 
 def test_registration_message_metadata_and_validation_field_name(client, monkeypatch):
-    monkeypatch.setattr(config, "PLANT_WRITE_TOKEN", "test-token")
     monkeypatch.setattr(plant_admin_repository, "insert_plant", lambda payload: None)
-    headers = {"Authorization": "Bearer test-token"}
+    headers = {}
     response = client.post("/api/database/plants", json=registration(), headers=headers)
     assert response.status_code == 201 and response.json()["message"]
     assert response.json()["meta"]["time_zone"] == "Asia/Makassar"

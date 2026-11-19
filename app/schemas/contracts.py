@@ -138,7 +138,7 @@ class RegisterPlantResponse(PlantDetailResponse):
     message: str
 
 
-class MetricCoverage(Contract):
+class MetricCoverageCounts(Contract):
     expected: int
     valid: int
     missing: int
@@ -147,6 +147,8 @@ class MetricCoverage(Contract):
     not_applicable: int
     partial: bool
 
+
+class MetricCoverage(MetricCoverageCounts):
     @computed_field
     @property
     def expected_plants(self) -> int:

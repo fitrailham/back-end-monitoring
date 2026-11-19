@@ -187,14 +187,16 @@ def upsert_alarms(plant_code: str, alarms: list[dict], collected_at, raw_respons
                 vendor_occurrence_id = EXCLUDED.vendor_occurrence_id,
                 device_sn = EXCLUDED.device_sn,
                 severity = EXCLUDED.severity,
-                state = EXCLUDED.state,
-                acknowledged = EXCLUDED.acknowledged,
+                state = CASE WHEN alarms.state = 'cleared' OR EXCLUDED.state = 'unknown'
+                             THEN alarms.state ELSE EXCLUDED.state END,
+                acknowledged = COALESCE(EXCLUDED.acknowledged, alarms.acknowledged),
                 name = EXCLUDED.name,
                 description = EXCLUDED.description,
                 occurred_at = COALESCE(EXCLUDED.occurred_at, alarms.occurred_at),
-                cleared_at = EXCLUDED.cleared_at,
+                cleared_at = COALESCE(EXCLUDED.cleared_at, alarms.cleared_at),
                 last_collected_at = EXCLUDED.last_collected_at,
-                state_source = EXCLUDED.state_source,
+                state_source = CASE WHEN alarms.state = 'cleared' OR EXCLUDED.state = 'unknown'
+                                    THEN alarms.state_source ELSE EXCLUDED.state_source END,
                 raw_response_id = EXCLUDED.raw_response_id,
                 raw_data = EXCLUDED.raw_data,
                 updated_at = NOW()

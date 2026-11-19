@@ -202,10 +202,10 @@ mengaktifkan endpoint yang belum dikonfirmasi atau mengubah `.env` pengguna.
 ## Registrasi dan pembaruan metadata lokal
 
 Jalankan `.venv\Scripts\python.exe -m app.migrate` untuk kolom metadata dan indeks.
-Migrasi tidak dijalankan otomatis. Atur token administrator pada `PLANT_WRITE_TOKEN`;
-request memakai `Authorization: Bearer <token>`. Tanpa konfigurasi, operasi tulis 403.
-Gunakan otorisasi server/proxy yang sesuai sebelum menawarkan administrasi pada deployment publik;
-token administrator tidak boleh dimasukkan ke bundle frontend publik.
+Migrasi tidak dijalankan otomatis. Endpoint data memerlukan sesi login; operasi tulis
+memerlukan role admin dan header `X-CSRF-Token`. Token statis `PLANT_WRITE_TOKEN`
+sudah digantikan. Jalankan migrasi autentikasi secara terpisah dan ikuti
+[kontrak autentikasi FE](auth-api.md), termasuk cookie, CSRF, dan `credentials: "include"`.
 
 `POST /api/database/plants` menerima plant_code/name, capacity_kwp positif, time_zone IANA,
 country/region/city/address, pasangan koordinat, grid_connected_on. Berhasil 201, duplikasi 409.

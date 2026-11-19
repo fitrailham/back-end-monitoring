@@ -20,7 +20,7 @@ class ApiException(Exception):
         self.fields = fields or []
 
 
-ERROR_RESPONSES = {status: {"model": ApiError} for status in (401, 403, 404, 409, 422, 503)}
+ERROR_RESPONSES = {status: {"model": ApiError} for status in (401, 403, 404, 409, 422, 429, 503)}
 
 
 def install_error_handlers(app):
@@ -32,7 +32,7 @@ def install_error_handlers(app):
         return response
 
     def response(request, status, code, message, retryable=False, fields=None, headers=None, retry_after_seconds=None):
-        return JSONResponse(status_code=status, headers=headers, content={
+        return JSONResponse(status_code=status, headers={"Cache-Control": "no-store", **(headers or {})}, content={
             "success": False, "message": message, "data": None,
             "error": {"code": code, "retryable": retryable,
                       "retry_after_seconds": retry_after_seconds, "fields": fields or []},

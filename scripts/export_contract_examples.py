@@ -13,9 +13,11 @@ import psycopg
 from fastapi.testclient import TestClient
 
 from app import config
+from app.auth import csrf_token
+from app.security import token_hash
 from app.errors import ApiException
 from app.main import app
-from app.repositories import fleet_repository, plant_admin_repository
+from app.repositories import auth_repository, fleet_repository, plant_admin_repository
 from app.services import alarm_service, fleet_service, portfolio_service, statistics_service
 
 
@@ -62,17 +64,21 @@ def main():
 
     with patch.object(fleet_repository, "fleet", side_effect=fetch), \
          patch.object(fleet_repository, "counter_samples", return_value=samples), \
-         patch.object(config, "PLANT_WRITE_TOKEN", "fixture-write-token"), \
+         patch.object(fleet_repository, "energy_statistics", return_value=[]), \
+         patch.object(auth_repository, "find_session", return_value={"id": "fixture-admin", "username": "admin",
+             "display_name": "Fixture admin", "role": "admin", "plant_codes": [],
+             "csrf_hash": token_hash(csrf_token("fixture-session"))}), \
          patch.object(config, "FUSIONSOLAR_ALARMS_PATH", "getAlarmList"), \
          patch.object(fleet_service, "utc_now", return_value=now), \
          patch.object(portfolio_service, "utc_now", return_value=now), \
          patch.object(statistics_service, "utc_now", return_value=now), \
          patch.object(alarm_service, "utc_now", return_value=now), \
          patch.object(plant_admin_repository, "insert_plant", side_effect=insert), \
-         TestClient(app) as client:
+         TestClient(app, cookies={"icongreen_session": "fixture-session"},
+                    headers={"X-CSRF-Token": csrf_token("fixture-session")}) as client:
 
         def capture(name, path, query=None, method="GET", body=None, actual_path=None, expected=200, error=False):
-            headers = {"Authorization": "Bearer fixture-write-token"} if method != "GET" else {}
+            headers = {}
             response = client.request(method, actual_path or path, params=query, json=body, headers=headers)
             assert response.status_code == expected, (name, response.status_code, response.text)
             record = {"method": method, "path": path, "query": query or {},

@@ -34,7 +34,6 @@ INVENTORY_STALE_AFTER_SECONDS = max(
 )
 SYNC_INTERVAL_MINUTES = max(10, int(os.getenv("SYNC_INTERVAL_MINUTES", "10")))
 EXPECTED_INTERVAL_SECONDS = SYNC_INTERVAL_MINUTES * 60
-PLANT_WRITE_TOKEN = os.getenv("PLANT_WRITE_TOKEN", "")
 # Extend only using the NBI reference for the deployed vendor version.
 DEVICE_TYPE_MAP = {
     "1": "inverter", "38": "inverter", "39": "ess", "41": "ess",
@@ -71,3 +70,19 @@ CORS_ORIGINS = [
     ).split(",")
     if origin.strip()
 ]
+
+# Browser dashboard authentication. Explicit origins only with credentials.
+APP_ENV = os.getenv("APP_ENV", "development").lower()
+AUTH_COOKIE_NAME = "icongreen_session"
+AUTH_COOKIE_SECURE = os.getenv("AUTH_COOKIE_SECURE", "true" if APP_ENV == "production" else "false").lower() == "true"
+AUTH_COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE", "lax").lower()
+AUTH_SESSION_SECONDS = max(60, int(os.getenv("AUTH_SESSION_SECONDS", "28800")))
+AUTH_LOGIN_WINDOW_SECONDS = max(60, int(os.getenv("AUTH_LOGIN_WINDOW_SECONDS", "900")))
+AUTH_LOGIN_MAX_ATTEMPTS = max(1, int(os.getenv("AUTH_LOGIN_MAX_ATTEMPTS", "5")))
+AUTH_LOGIN_IP_MAX_ATTEMPTS = max(AUTH_LOGIN_MAX_ATTEMPTS, int(os.getenv("AUTH_LOGIN_IP_MAX_ATTEMPTS", "30")))
+if AUTH_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
+    raise ValueError("AUTH_COOKIE_SAMESITE harus lax, strict, atau none")
+if (APP_ENV == "production" or AUTH_COOKIE_SAMESITE == "none") and not AUTH_COOKIE_SECURE:
+    raise ValueError("Produksi / SameSite=None memerlukan AUTH_COOKIE_SECURE=true")
+if any("*" in origin for origin in CORS_ORIGINS):
+    raise ValueError("CORS_ORIGINS harus berisi origin eksplisit, tanpa wildcard")

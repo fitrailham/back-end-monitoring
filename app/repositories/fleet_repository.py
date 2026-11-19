@@ -3,7 +3,7 @@ from app import config
 from app.database import fetch_rows
 
 
-def fleet(plant_code: str | None = None):
+def fleet(plant_code: str | None = None, allowed_codes: list[str] | None = None):
     return fetch_rows("""
         SELECT p.plant_code, p.plant_name, p.capacity_kwp::float8 AS capacity_kwp,
             p.address, p.is_demo,
@@ -201,9 +201,10 @@ def fleet(plant_code: str | None = None):
             ORDER BY x.id DESC LIMIT 1
         ) j ON TRUE
         WHERE (%s::text IS NULL OR p.plant_code = %s)
+          AND (%s::text[] IS NULL OR p.plant_code = ANY(%s::text[]))
         ORDER BY p.plant_name, p.plant_code
     """, (config.FUSIONSOLAR_ALARMS_PATH or "getAlarmList",
-           config.FUSIONSOLAR_ALARMS_PATH, plant_code, plant_code))
+           config.FUSIONSOLAR_ALARMS_PATH, plant_code, plant_code, allowed_codes, allowed_codes))
 
 
 def counter_samples(codes: list[str], start, end):

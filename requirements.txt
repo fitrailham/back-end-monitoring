@@ -9,4 +9,5 @@ psycopg[binary]
 python-dotenv
 tzdata
 httpx
+rich
 pytest

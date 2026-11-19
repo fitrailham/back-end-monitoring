@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 from fastapi.testclient import TestClient
 from app.main import app
-from app.repositories import analytics_repository as repository
+from app.repositories import analytics_repository as repository, auth_repository
 from app.services import analytics_service, fleet_service
 
 
@@ -35,6 +35,8 @@ def main():
                 "power_direction_convention": "unverified", "status": "unknown", "field_quality": {"active_power_kw": "VALID"}}]
     examples = {"notice": "EXAMPLE_ONLY: synthetic fixtures, never production data.", "endpoints": {}, "errors": {}}
     with ExitStack() as stack:
+        stack.enter_context(patch.object(auth_repository, "find_session", return_value={
+            "id": "fixture-admin", "username": "admin", "role": "admin", "plant_codes": []}))
         stack.enter_context(patch.object(fleet_service, "get_rows", return_value=[{"plant_code": code, "is_demo": False}]))
         stack.enter_context(patch.object(fleet_service, "utc_now", return_value=now))
         stack.enter_context(patch.object(analytics_service, "utc_now", return_value=now))
@@ -43,7 +45,7 @@ def main():
         counters_mock = stack.enter_context(patch.object(repository, "device_counter_samples", return_value=counters))
         stack.enter_context(patch.object(repository, "device", return_value=devices[0]))
         stack.enter_context(patch.object(repository, "device_history", return_value=(history, 1)))
-        client = stack.enter_context(TestClient(app))
+        client = stack.enter_context(TestClient(app, cookies={"icongreen_session": "fixture-session"}))
 
         def capture(name, path, params, actual=None, status=200):
             response = client.get(actual or path, params=params)

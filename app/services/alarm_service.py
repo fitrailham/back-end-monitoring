@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
 
 from app import config
+from app.errors import ApiException
 from app.services.fusionsolar_client import complete_list, extract_list
 from app.services.fleet_service import response_meta
+from app.services.inventory_service import devices
 from app.services.values import aware_time, finite_json, number, utc_now
 
 SEVERITIES = ("critical", "major", "minor", "warning", "unclassified")
@@ -38,8 +40,11 @@ def normalize_alarm(raw, plant_code):
     device_id = raw.get("device_id", raw.get("devDn", raw.get("devId")))
     # Vendor alarmId is an alarm code, not necessarily a unique occurrence ID.
     alarm_id = raw.get("alarm_id")
-    if alarm_id is None and vendor_id is not None:
-        alarm_id = ":".join(str(v) for v in (plant_code, serial or device_id or "unknown", vendor_id, raw.get("causeId", ""), occurred_at or "unknown"))
+    occurrence_id = raw.get("vendor_occurrence_id", raw.get("occurrenceId"))
+    if alarm_id is None and vendor_id is not None and occurred_at is not None and (serial or device_id):
+        alarm_id = ":".join(str(v) for v in (plant_code, serial or device_id, vendor_id, raw.get("causeId", ""), occurred_at))
+    elif alarm_id is None and occurrence_id is not None:
+        alarm_id = f"{plant_code}:occurrence:{occurrence_id}"
     acknowledged = raw.get("acknowledged")
     if not isinstance(acknowledged, bool):
         acknowledged = None
@@ -53,7 +58,24 @@ def normalize_alarm(raw, plant_code):
             "occurred_at": occurred_at, "cleared_at": cleared_at}
 
 
-def fleet_alarms(raw_rows, severity=None, state=None, page=None, page_size=None, plant_code=None):
+def dashboard_alarm(alarm, inventory):
+    occurrence_id = alarm.get("vendor_occurrence_id", alarm.get("occurrenceId"))
+    if occurrence_id is not None:
+        alarm["alarm_id"] = f"{alarm['plant_code']}:occurrence:{occurrence_id}"
+    if not alarm["alarm_id"] or ":raw:" in alarm["alarm_id"] or alarm["alarm_id"].endswith(":unknown"):
+        return None
+    matches = [device for device in inventory
+               if (alarm["device_id"] or alarm["device_sn"])
+               and (not alarm["device_id"] or device["device_id"] == alarm["device_id"])
+               and (not alarm["device_sn"] or device["device_sn"] == alarm["device_sn"])]
+    source_name = alarm.get("device_name") or alarm.get("devName") or alarm.get("deviceName")
+    suggestion = alarm.get("repair_suggestion") or alarm.get("repairSuggestion")
+    alarm["device_name"] = source_name if isinstance(source_name, str) else matches[0]["device_name"] if len(matches) == 1 else None
+    alarm["repair_suggestion"] = suggestion if isinstance(suggestion, str) else None
+    return alarm
+
+
+def fleet_alarms(raw_rows, severity=None, state=None, page=None, page_size=None, plant_code=None, *, dashboard=False):
     now = utc_now()
     # An empty filtered scope still reports whether the source itself is configured.
     configured = bool(config.FUSIONSOLAR_ALARMS_PATH) if not raw_rows else False
@@ -70,29 +92,36 @@ def fleet_alarms(raw_rows, severity=None, state=None, page=None, page_size=None,
         configured = True
         coverage["configured_plants"] += 1
         normalized = row.get("normalized_alarms")
+        payload = row.get("alarms_payload")
+        payload_complete = complete_list(payload)
         if normalized is not None or row.get("alarm_source_status") is not None:
             items = normalized or []
             collected = aware_time(row.get("alarm_last_success_at"))
             failed = row.get("alarm_source_status") == "failed"
             source_complete = row.get("alarm_source_complete") is True
+            if dashboard and payload_complete:
+                collected = collected or aware_time(row.get("alarms_collected_at"))
+                if normalized is None:
+                    items = extract_list(payload)
+            snapshot_available = source_complete or dashboard and (normalized is not None or payload_complete)
         else:
-            payload = row.get("alarms_payload")
-            items = extract_list(payload) if complete_list(payload) else None
+            items = extract_list(payload) if payload_complete else None
             collected = aware_time(row.get("alarms_collected_at"))
             job_started = aware_time(row.get("alarm_job_started_at"))
             failed = row.get("alarm_job_status") == "FAILED" and (not collected or not job_started or job_started >= collected)
-            source_complete = complete_list(payload)
+            source_complete = snapshot_available = payload_complete
         if failed:
             coverage["failed_plants"] += 1
-        if not source_complete or collected is None or items is None:
+        if not snapshot_available or collected is None or items is None:
             coverage["missing_plants"] += 1
             continue
         times.append(collected)
         stale = (now - collected).total_seconds() > config.STALE_AFTER_MINUTES * 60
         if stale:
             coverage["stale_plants"] += 1
-        elif not failed:
+        elif not failed and source_complete:
             coverage["valid_plants"] += 1
+        inventory = devices(row.get("inventory_payload"), row["plant_code"]) if dashboard else []
         for raw in items:
             if str(raw.get("stationCode", row["plant_code"])) != row["plant_code"]:
                 continue
@@ -101,13 +130,19 @@ def fleet_alarms(raw_rows, severity=None, state=None, page=None, page_size=None,
             unknown_states = unknown_states or alarm["state"] is None
             if severity and alarm["severity"] != severity or state and alarm["state"] != state:
                 continue
+            if dashboard and dashboard_alarm(alarm, inventory) is None:
+                unknown_states = True
+                continue
             alarms.append(alarm)
     coverage["complete"] = configured and coverage["configured_plants"] == len(raw_rows) \
         and coverage["valid_plants"] == len(raw_rows) and not unknown_states
     quality = "missing" if not configured or not times else "partial" if not coverage["complete"] else "fresh"
     if times and coverage["stale_plants"] == len(raw_rows):
         quality = "stale"
-    alarms.sort(key=lambda a: (str(a["occurred_at"] or ""), a["alarm_id"] or ""), reverse=True)
+    if dashboard and not times and coverage["failed_plants"]:
+        raise ApiException(503, "SOURCE_UNAVAILABLE", "Sumber alarm sementara tidak tersedia.", True)
+    alarms.sort(key=lambda a: (a["occurred_at"] or datetime.min.replace(tzinfo=timezone.utc),
+                               a["alarm_id"] or ""), reverse=True)
     # Deduplicate identical occurrences, preserving alarms with unknown identity.
     seen, unique = set(), []
     for alarm in alarms:
@@ -119,7 +154,8 @@ def fleet_alarms(raw_rows, severity=None, state=None, page=None, page_size=None,
     alarms = unique
     total = len(alarms) if times else (0 if configured and not raw_rows else None)
     filters = {k: v for k, v in {"plant_code": plant_code, "severity": severity, "state": state}.items() if v is not None}
-    meta = response_meta(alarms, now, is_partial=not coverage["complete"], coverage=coverage,
+    snapshot = {"data": alarms, "coverage": coverage, "collected_at": min(times) if times else None} if dashboard else alarms
+    meta = response_meta(snapshot, now, is_partial=not coverage["complete"], coverage=coverage,
                          scope="plant" if plant_code else "all_configured_plants_filtered" if filters else "all_configured_plants",
                          filters_applied=filters, reason="ALARM_SOURCE_NOT_CONFIGURED" if not configured else None)
     if page is not None or page_size is not None:
